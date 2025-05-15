@@ -1,0 +1,81 @@
+[package]
+edition = "2021"
+name = "firmware"
+version = "0.1.0"
+
+[[bin]]
+name = "firmware"
+path = "./src/bin/main.rs"
+
+[dependencies]
+# Embassy Related
+embassy-net = { version = "0.7.0", features = [
+    "dhcpv4",
+    "dns",
+    "medium-ethernet",
+    "tcp",
+    "udp",
+] }
+embassy-executor = { version = "0.7.0", features = [
+    "nightly",
+    "task-arena-size-131072",
+    "executor-thread",
+] }
+embassy-time = "0.4.0"
+
+# ESP Related
+esp-alloc = "0.7.0"
+esp-backtrace = { version = "0.15.1", features = [
+    "exception-handler",
+    "panic-handler",
+    "println",
+] }
+esp-hal = { version = "1.0.0-beta.0", features = ["log", "unstable", "psram"] }
+esp-hal-embassy = { version = "0.7.0", features = ["log", "executors"] }
+esp-println = { version = "0.13.1", features = ["log"] }
+esp-wifi = { version = "0.13.0", features = ["log", "wifi"] }
+esp-wifi-sys = { version = "0.7.1", features = ["log"] }
+
+# Others
+embedded-sdmmc = "0.8.1"
+embedded-hal-bus = "0.3.0"
+static_cell = { version = "2.1.0", features = ["nightly"] }
+log = "0.4.27"
+reqwless = "0.13.0"
+audiopus_sys = { path = "../audiopus_sys" }
+opus = { path = "../opus-rs" }
+
+
+[features]
+default = ["esp32"]
+esp32 = [
+    "esp-hal/esp32",
+    "esp-backtrace/esp32",
+    "esp-hal-embassy/esp32",
+    "esp-println/esp32",
+    "esp-wifi/esp32",
+    "esp-wifi-sys/esp32",
+]
+esp32s3 = [
+    "esp-hal/esp32s3",
+    "esp-backtrace/esp32s3",
+    "esp-hal-embassy/esp32s3",
+    "esp-println/esp32s3",
+    "esp-wifi/esp32",
+    "esp-wifi-sys/esp32",
+]
+
+
+[profile.dev]
+# Rust debug is too slow.
+# For debug builds always builds with some optimization
+opt-level = "s"
+
+[profile.release]
+codegen-units = 1        # LLVM can perform better optimizations using a single thread
+debug = 2
+debug-assertions = false
+incremental = false
+lto = 'fat'
+opt-level = 's'
+overflow-checks = false

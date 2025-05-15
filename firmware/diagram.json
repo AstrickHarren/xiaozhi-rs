@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "author": "Astrick Harren",
+  "editor": "wokwi",
+  "parts": [
+    {
+      "type": "board-esp32-devkit-c-v4",
+      "id": "esp",
+      "top": 0,
+      "left": 0,
+      "attrs": {}
+    },
+    {
+      "type": "wokwi-microsd-card",
+      "id": "sd1",
+      "top": 57.83,
+      "left": 182.47,
+      "attrs": {}
+    }
+  ],
+  "connections": [
+    ["esp:TX", "$serialMonitor:RX", "", []],
+    ["esp:RX", "$serialMonitor:TX", "", []],
+    ["sd1:DI", "esp:23", "green", ["h0"]],
+    ["sd1:CS", "esp:4", "green", ["h0"]],
+    ["sd1:DO", "esp:19", "green", ["h0"]],
+    ["sd1:SCK", "esp:18", "green", ["h0"]]
+  ],
+  "dependencies": {}
+}

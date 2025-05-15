@@ -1,0 +1,5 @@
+[wokwi]
+version = 1
+firmware = 'target/xtensa-esp32s3-none-elf/release/firmware'
+elf = 'target/xtensa-esp32s3-none-elf/release/firmware'
+gdbServerPort = 3333

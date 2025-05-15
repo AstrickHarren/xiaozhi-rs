@@ -1,0 +1,20 @@
+[package]
+name = "opus"
+version = "0.3.0"
+authors = ["Tad Hardesty <tad@platymuus.com>"]
+edition = "2024"
+
+description = "Safe Rust bindings for libopus"
+readme = "README.md"
+license = "MIT/Apache-2.0"
+keywords = ["opus", "codec", "voice", "sound", "audio"]
+categories = ["api-bindings", "encoding", "compression",
+	"multimedia::audio", "multimedia::encoding"]
+
+repository = "https://github.com/SpaceManiac/opus-rs"
+documentation = "https://docs.rs/opus/0.3.0/opus"
+
+[dependencies]
+audiopus_sys = { path = "../audiopus_sys" }
+
+[dev-dependencies]

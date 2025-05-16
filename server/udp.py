@@ -8,7 +8,7 @@ async def create_udp(local_addr=None, remote_addr=None):
     return UdpConn(sock)
 
 class UdpConn:
-    def __init__(self, sock):
+    def __init__(self, sock: asyncudp.Socket):
         self.sock = sock
         self.client_abort = False
 

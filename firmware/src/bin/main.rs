@@ -2,8 +2,7 @@
 #![no_main]
 #![feature(impl_trait_in_assoc_type)]
 
-use core::str::FromStr;
-
+use bytes::Bytes;
 use bytes::BytesMut;
 use embassy_executor::Spawner;
 use embassy_net::udp::PacketMetadata;
@@ -16,6 +15,8 @@ use esp_hal::i2s::master::{I2s, I2sTx};
 use esp_hal::time::Rate;
 use esp_hal::timer::timg::TimerGroup;
 use esp_hal::{dma_circular_buffers_chunk_size, Async};
+use esp_println::dbg;
+use esp_println::println;
 use firmware::wifi::{WifiConfig, WifiConnection};
 use log::{debug, error, info, warn, LevelFilter};
 use opus::Decoder;
@@ -27,14 +28,14 @@ async fn main(s: Spawner) {
     let timg1 = TimerGroup::new(peripherals.TIMG1);
     esp_hal_embassy::init(timg1.timer0);
     esp_alloc::heap_allocator!(size: 100 * 1024);
-    esp_println::logger::init_logger(LevelFilter::Debug);
+    esp_println::logger::init_logger(LevelFilter::Info);
 
     // Start the WI-FI
     info!("Connecting to Wifi");
     let stack = {
         let cfg = WifiConfig {
-            ssid: "Wokwi-GUEST",
-            password: None,
+            ssid: "Thunderstorm",
+            password: "12345678".into(),
             wifi: peripherals.WIFI,
             timg: peripherals.TIMG0,
             rng: peripherals.RNG,
@@ -56,7 +57,7 @@ async fn main(s: Spawner) {
             esp_hal::i2s::master::Standard::Philips,
             esp_hal::i2s::master::DataFormat::Data16Channel16,
             Rate::from_khz(16),
-            peripherals.DMA_I2S1,
+            peripherals.DMA_CH0,
             rx_d,
             tx_d,
         )
@@ -95,15 +96,18 @@ async fn udp_play(stack: Stack<'_>, i2s_tx: I2sTx<'_, Async>, rx_buf: &mut [u8])
         &mut [PacketMetadata::EMPTY; 2],
     );
     let mut udp = UdpSocket::new(stack, rx_meta, rx, tx_meta, tx);
-    udp.bind(IpEndpoint::from_str("192.168.31.83:8080").unwrap())
+    let addr = stack.config_v4().unwrap().address.address();
+    udp.bind(IpEndpoint::new(addr.into(), 8080))
         .inspect_err(|e| error!("Failed to bind UDP socket: {e:?}"))
         .ok();
 
     info!("Waiting for udp packets");
     let buf = &mut [0; 1024];
-    let pcm = &mut [0; 2048];
+    let pcm = &mut [0; 960];
     let mut dec = Decoder::new(16000, opus::Channels::Mono).unwrap();
     let mut transfer = i2s_tx.write_dma_circular_async(rx_buf).unwrap();
+
+    let mut count = 0;
     loop {
         match udp
             .recv_from(buf)
@@ -114,19 +118,20 @@ async fn udp_play(stack: Stack<'_>, i2s_tx: I2sTx<'_, Async>, rx_buf: &mut [u8])
                 debug!("Udp recved {n} bytes");
                 let buf = &mut buf[..n];
                 let n = dec.decode(buf, pcm, false).unwrap();
-                let mut pcm: BytesMut = pcm
+                let pcm: BytesMut = pcm
                     .into_iter()
                     .take(n)
                     .flat_map(|x| [*x, *x])
                     .flat_map(|x| x.to_le_bytes())
                     .collect();
+                // let pcm =
+                //     unsafe { core::slice::from_raw_parts_mut(pcm.as_mut_ptr() as *mut u8, n * 2) };
 
                 transfer
-                    .push(buf)
+                    .push(&pcm)
                     .await
                     .inspect_err(|e| error!("Failed to push buffer: {e:?}"))
                     .ok();
-                // i2s_tx.write_dma_async(buf).await.ignore_or_debug();
             }
             _ => break,
         }

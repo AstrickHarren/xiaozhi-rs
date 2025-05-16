@@ -1,33 +1,30 @@
 import asyncio
-import socket
 import time
-import sounddevice
-import numpy as np
 
 import opuslib_next
+
 from audio import sendAudio
 from udp import create_udp
 import util
-from sounddevice import play
-import audioop
-
-datas, _ = util.audio_to_data("./assets/中秋月.mp3")
-
-decoded = b''
-decoder = opuslib_next.Decoder(16000, 1)
-for data in datas:
-    audio = decoder.decode(data, 960)
-    decoded += audio
-print(len(decoded))
-play(np.frombuffer(decoded, dtype=np.int16), samplerate=16000)
+import numpy as np
 
 
-# buf = np.frombuffer(decoded, dtype=np.int16)
-# def callback(out, frames, time, status):
-#     global buf
-#     out[:, 0] = buf[:frames]
-#     buf = buf[frames:]
-# stream = sounddevice.OutputStream(samplerate=16000, channels=1, callback=callback)
-# stream.start()
+async def main():
+    datas, _ = util.audio_to_data("./assets/中秋月.mp3")
+    conn = await create_udp(remote_addr=("172.20.10.7", 8080), local_addr=("0.0.0.0", 8081))
+    await sendAudio(conn, datas)
 
-time.sleep(1)
+
+def verify():
+    datas, _ = util.audio_to_data("./assets/中秋月.mp3")
+    dec = opuslib_next.Decoder(16000, 1)
+    for data in datas[:10]:
+        print(f"-----{len(data)}-----")
+        print(data)
+        pcm = dec.decode(data, 960)
+
+
+verify()
+asyncio.run(main())
+# print("sleeping")
+time.sleep(1000)

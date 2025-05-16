@@ -34,6 +34,7 @@ async def sendAudio(conn, audios, pre_buffer=True):
         if delay > 0:
             await asyncio.sleep(delay)
 
+        print("send opus packet: {}", len(opus_packet))
         await conn.send(opus_packet)
 
         play_position += frame_duration

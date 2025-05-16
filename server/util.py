@@ -3,6 +3,20 @@ import numpy as np
 import opuslib_next
 from pydub import AudioSegment
 
+def raw_data(audio_file_path):
+    file_type = os.path.splitext(audio_file_path)[1]
+    if file_type:
+        file_type = file_type.lstrip(".")
+    # 读取音频文件，-nostdin 参数：不要从标准输入读取数据，否则FFmpeg会阻塞
+    audio = AudioSegment.from_file(
+        audio_file_path, format=file_type, parameters=["-nostdin"]
+    )
+    # 转换为单声道/16kHz采样率/16位小端编码（确保与编码器匹配）
+    audio = audio.set_channels(1).set_frame_rate(16000).set_sample_width(2)
+    # 获取原始PCM数据（16位小端）
+    raw_data = audio.raw_data
+    return raw_data
+
 def audio_to_data(audio_file_path, is_opus=True):
     # 获取文件后缀名
     file_type = os.path.splitext(audio_file_path)[1]

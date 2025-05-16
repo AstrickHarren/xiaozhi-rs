@@ -37,11 +37,14 @@ esp-wifi = { version = "0.13.0", features = ["log", "wifi"] }
 esp-wifi-sys = { version = "0.7.1", features = ["log"] }
 
 # Others
+bytes = { version = "1.10.0", default-features = false }
 embedded-sdmmc = "0.8.1"
 embedded-hal-bus = "0.3.0"
 static_cell = { version = "2.1.0", features = ["nightly"] }
 log = "0.4.27"
 reqwless = "0.13.0"
+
+# Opus
 audiopus_sys = { path = "../audiopus_sys" }
 opus = { path = "../opus-rs" }
 

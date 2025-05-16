@@ -2,6 +2,7 @@
 runner = "espflash flash --monitor --chip esp32"
 
 [env]
+OPUS_LIB_DIR = "/Users/astrick/Repositories/chatbot-rs/firmware/lib"
 
 [build]
 rustflags = ["-C", "link-arg=-nostartfiles"]

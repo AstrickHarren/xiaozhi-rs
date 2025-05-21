@@ -72,12 +72,12 @@ impl WifiConnection {
     }
 }
 
-#[embassy_executor::task(pool_size = 4)]
+#[embassy_executor::task]
 async fn net_task(mut runner: Runner<'static, WifiDevice<'static>>) {
     runner.run().await
 }
 
-#[embassy_executor::task(pool_size = 4)]
+#[embassy_executor::task]
 async fn connection(
     mut controller: WifiController<'static>,
     auth_method: AuthMethod,

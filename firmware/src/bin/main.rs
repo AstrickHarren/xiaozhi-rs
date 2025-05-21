@@ -2,24 +2,37 @@
 #![no_main]
 #![feature(impl_trait_in_assoc_type)]
 
-use bytes::Bytes;
+use bytes::Buf;
 use bytes::BytesMut;
 use embassy_executor::Spawner;
 use embassy_net::udp::PacketMetadata;
 use embassy_net::udp::UdpSocket;
 use embassy_net::{IpEndpoint, Stack};
+use embassy_sync::blocking_mutex::raw::NoopRawMutex;
+use embassy_sync::channel::Channel;
+use embassy_sync::channel::Receiver;
+use embassy_sync::channel::Sender;
 use embassy_time::{Duration, Timer};
 use esp_backtrace as _;
 use esp_hal::clock::CpuClock;
+use esp_hal::dma::DmaPriority;
 use esp_hal::i2s::master::{I2s, I2sTx};
 use esp_hal::time::Rate;
 use esp_hal::timer::timg::TimerGroup;
 use esp_hal::{dma_circular_buffers_chunk_size, Async};
-use esp_println::dbg;
-use esp_println::println;
 use firmware::wifi::{WifiConfig, WifiConnection};
 use log::{debug, error, info, warn, LevelFilter};
 use opus::Decoder;
+
+// When you are okay with using a nightly compiler, it's better to use https://docs.rs/static_cell/2.1.0/static_cell/macro.make_static.html
+macro_rules! mk_static {
+    ($t:ty,$val:expr) => {{
+        static STATIC_CELL: static_cell::StaticCell<$t> = static_cell::StaticCell::new();
+        #[deny(unused_attributes)]
+        let x = STATIC_CELL.uninit().write(($val));
+        x
+    }};
+}
 
 #[esp_hal_embassy::main]
 async fn main(s: Spawner) {
@@ -51,7 +64,7 @@ async fn main(s: Spawner) {
 
     // Set up I2S
     let (rx_buf, i2s_tx) = {
-        let (rx_buf, rx_d, _, tx_d) = dma_circular_buffers_chunk_size!(512 * 6, 512 * 6, 512);
+        let (rx_buf, rx_d, _, tx_d) = dma_circular_buffers_chunk_size!(1024 * 64, 1024 * 32, 1024);
         let i2s = I2s::new(
             peripherals.I2S1,
             esp_hal::i2s::master::Standard::Philips,
@@ -62,16 +75,28 @@ async fn main(s: Spawner) {
             tx_d,
         )
         .into_async();
-        let i2s_tx = i2s
-            .i2s_tx
-            .with_ws(peripherals.GPIO16)
-            .with_bclk(peripherals.GPIO15)
-            .with_dout(peripherals.GPIO7)
-            .build();
+        let i2s_tx = {
+            let mut i2s = i2s
+                .i2s_tx
+                .with_ws(peripherals.GPIO16)
+                .with_bclk(peripherals.GPIO15)
+                .with_dout(peripherals.GPIO7);
+            i2s.tx_channel.set_priority(DmaPriority::Priority0);
+            i2s.build()
+        };
         (rx_buf, i2s_tx)
     };
 
-    udp_play(stack, i2s_tx, rx_buf).await;
+    // Set up channel
+    let ch = &*mk_static! {
+        Channel::<NoopRawMutex, BytesMut, 10>,
+        Channel::new()
+    };
+    let sender = ch.sender();
+    let receiver = ch.receiver();
+    s.spawn(audio_task(receiver, i2s_tx, rx_buf)).unwrap();
+
+    udp_play(stack, sender).await;
 
     Timer::after(Duration::from_millis(1000)).await;
     warn!("Sleeping!");
@@ -86,7 +111,34 @@ impl embedded_sdmmc::TimeSource for DummyTimeSource {
     }
 }
 
-async fn udp_play(stack: Stack<'_>, i2s_tx: I2sTx<'_, Async>, rx_buf: &mut [u8]) {
+#[embassy_executor::task]
+async fn audio_task(
+    receiver: Receiver<'static, NoopRawMutex, BytesMut, 10>,
+    i2s_tx: I2sTx<'static, Async>,
+    rx_buf: &'static mut [u8],
+) {
+    let mut transfer = i2s_tx.write_dma_circular_async(rx_buf).unwrap();
+    loop {
+        debug!("receiving new from queue");
+        let mut data = receiver.receive().await;
+        while data.len() > 0 {
+            debug!(
+                "i2s remains {:?}, data has {:?}",
+                transfer.available().await,
+                data.len()
+            );
+            let n = transfer.push(&data).await.unwrap();
+            data.advance(n);
+        }
+    }
+}
+
+async fn udp_play(
+    stack: Stack<'_>,
+    sender: Sender<'static, NoopRawMutex, BytesMut, 10>,
+    // i2s_tx: I2sTx<'_, Async>,
+    // rx_buf: &mut [u8],
+) {
     // UDP get wav file
     const UDP_BUF_SIZE: usize = 4096;
     let (rx, tx, rx_meta, tx_meta) = (
@@ -105,10 +157,10 @@ async fn udp_play(stack: Stack<'_>, i2s_tx: I2sTx<'_, Async>, rx_buf: &mut [u8])
     let buf = &mut [0; 1024];
     let pcm = &mut [0; 960];
     let mut dec = Decoder::new(16000, opus::Channels::Mono).unwrap();
-    let mut transfer = i2s_tx.write_dma_circular_async(rx_buf).unwrap();
+    // let mut transfer = i2s_tx.write_dma_circular_async(rx_buf).unwrap();
 
-    let mut count = 0;
     loop {
+        debug!("waiting for next udp packet");
         match udp
             .recv_from(buf)
             .await
@@ -124,14 +176,17 @@ async fn udp_play(stack: Stack<'_>, i2s_tx: I2sTx<'_, Async>, rx_buf: &mut [u8])
                     .flat_map(|x| [*x, *x])
                     .flat_map(|x| x.to_le_bytes())
                     .collect();
+                sender.try_send(pcm).unwrap();
                 // let pcm =
                 //     unsafe { core::slice::from_raw_parts_mut(pcm.as_mut_ptr() as *mut u8, n * 2) };
 
-                transfer
-                    .push(&pcm)
-                    .await
-                    .inspect_err(|e| error!("Failed to push buffer: {e:?}"))
-                    .ok();
+                // while transfer.available().await.unwrap() < pcm.len() {}
+                // let n = transfer
+                //     .push(&pcm)
+                //     .await
+                //     .inspect_err(|e| error!("Failed to push buffer: {e:?}"))
+                //     .unwrap();
+                // assert!(n == pcm.len())
             }
             _ => break,
         }

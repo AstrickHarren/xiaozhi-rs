@@ -11,7 +11,8 @@ import numpy as np
 
 async def main():
     datas, _ = util.audio_to_data("./assets/中秋月.mp3")
-    conn = await create_udp(remote_addr=("172.20.10.7", 8080), local_addr=("0.0.0.0", 8081))
+    conn = await create_udp(remote_addr=("172.20.10.7", 8080))
+    await conn.send(b"hello")
     await sendAudio(conn, datas)
 
 
@@ -24,7 +25,7 @@ def verify():
         pcm = dec.decode(data, 960)
 
 
-verify()
+# verify()
 asyncio.run(main())
 # print("sleeping")
 time.sleep(1000)

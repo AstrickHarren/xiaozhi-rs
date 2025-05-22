@@ -4,3 +4,4 @@ audioop-lts==0.2.1
 numpy==1.26.4
 asyncudp==0.11.0
 sounddevice==0.5.1
+isort==6.0.1

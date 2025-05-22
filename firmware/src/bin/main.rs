@@ -2,6 +2,8 @@
 #![no_main]
 #![feature(impl_trait_in_assoc_type)]
 
+use core::ops::Deref;
+
 use bytes::Buf;
 use bytes::BytesMut;
 use embassy_executor::Spawner;
@@ -17,9 +19,14 @@ use esp_backtrace as _;
 use esp_hal::clock::CpuClock;
 use esp_hal::dma::DmaPriority;
 use esp_hal::i2s::master::{I2s, I2sTx};
+use esp_hal::peripheral::PeripheralRef;
+use esp_hal::peripherals::I2S1;
 use esp_hal::time::Rate;
 use esp_hal::timer::timg::TimerGroup;
 use esp_hal::{dma_circular_buffers_chunk_size, Async};
+use esp_println::print;
+use esp_println::println;
+use firmware::p3::P3Reader;
 use firmware::wifi::{WifiConfig, WifiConnection};
 use log::{debug, error, info, warn, LevelFilter};
 use opus::Decoder;
@@ -34,6 +41,8 @@ macro_rules! mk_static {
     }};
 }
 
+static wifi_config_p3: &[u8] = include_bytes!("../../assets/wificonfig.p3");
+
 #[esp_hal_embassy::main]
 async fn main(s: Spawner) {
     let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
@@ -44,27 +53,28 @@ async fn main(s: Spawner) {
     esp_println::logger::init_logger(LevelFilter::Info);
 
     // Start the WI-FI
-    info!("Connecting to Wifi");
-    let stack = {
-        let cfg = WifiConfig {
-            ssid: "Thunderstorm",
-            password: "12345678".into(),
-            wifi: peripherals.WIFI,
-            timg: peripherals.TIMG0,
-            rng: peripherals.RNG,
-            radio_clk: peripherals.RADIO_CLK,
-        };
-        let stack = WifiConnection::connect(s, cfg).await;
-        info!("Waiting for IP");
-        stack.wait_config_up().await;
-        let ip = stack.config_v4().unwrap().address;
-        info!("Got IP: {}", ip);
-        stack
-    };
+    // info!("Connecting to Wifi");
+    // let stack = {
+    //     let cfg = WifiConfig {
+    //         ssid: "Thunderstorm",
+    //         password: "12345678".into(),
+    //         wifi: peripherals.WIFI,
+    //         timg: peripherals.TIMG0,
+    //         rng: peripherals.RNG,
+    //         radio_clk: peripherals.RADIO_CLK,
+    //     };
+    //     let stack = WifiConnection::connect(s, cfg).await;
+    //     info!("Waiting for IP");
+    //     stack.wait_config_up().await;
+    //     let ip = stack.config_v4().unwrap().address;
+    //     info!("Got IP: {}", ip);
+    //     stack
+    // };
 
     // Set up I2S
     let (rx_buf, i2s_tx) = {
         let (rx_buf, rx_d, _, tx_d) = dma_circular_buffers_chunk_size!(1024 * 64, 1024 * 32, 1024);
+        // peripherals.I2S1.register_block().tx_conf();
         let i2s = I2s::new(
             peripherals.I2S1,
             esp_hal::i2s::master::Standard::Philips,
@@ -96,7 +106,8 @@ async fn main(s: Spawner) {
     let receiver = ch.receiver();
     s.spawn(audio_task(receiver, i2s_tx, rx_buf)).unwrap();
 
-    udp_play(stack, sender).await;
+    // udp_play(stack, sender).await;
+    local_play(sender).await;
 
     Timer::after(Duration::from_millis(1000)).await;
     warn!("Sleeping!");
@@ -117,19 +128,53 @@ async fn audio_task(
     i2s_tx: I2sTx<'static, Async>,
     rx_buf: &'static mut [u8],
 ) {
+    const SILENSE_SIZE: usize = 100;
+    let max_silense_size = rx_buf.len();
     let mut transfer = i2s_tx.write_dma_circular_async(rx_buf).unwrap();
+
+    let mut i2s_zero_bytes = 0;
     loop {
-        debug!("receiving new from queue");
-        let mut data = receiver.receive().await;
-        while data.len() > 0 {
-            debug!(
-                "i2s remains {:?}, data has {:?}",
-                transfer.available().await,
-                data.len()
-            );
+        debug!("queued {} audio samples", receiver.len());
+
+        let mut data = match receiver.try_receive() {
+            Ok(p) => p,
+            Err(_) if i2s_zero_bytes >= max_silense_size => {
+                i2s_zero_bytes = 0;
+                receiver.receive().await
+            }
+            Err(_) => {
+                i2s_zero_bytes += SILENSE_SIZE;
+                let mut silent = BytesMut::with_capacity(SILENSE_SIZE);
+                silent.resize(SILENSE_SIZE, 0);
+                silent
+            }
+        };
+
+        // Push all bytes (audio or silence) into I²S
+        while !data.is_empty() {
             let n = transfer.push(&data).await.unwrap();
             data.advance(n);
         }
+    }
+}
+
+async fn local_play(sender: Sender<'static, NoopRawMutex, BytesMut, 10>) {
+    let reader = P3Reader::new(wifi_config_p3);
+    let pcm = &mut [0; 960];
+    let mut dec = Decoder::new(16000, opus::Channels::Mono).unwrap();
+    for packet in reader {
+        let buf = packet.unwrap();
+        let n = dec.decode(&buf, pcm, false).unwrap();
+
+        let pcm: BytesMut = pcm
+            .into_iter()
+            .take(n)
+            .flat_map(|x| [*x, *x])
+            .flat_map(|x| x.to_le_bytes())
+            .collect();
+        sender.try_send(pcm).unwrap();
+
+        Timer::after_millis(55).await;
     }
 }
 
@@ -160,14 +205,14 @@ async fn udp_play(
     // let mut transfer = i2s_tx.write_dma_circular_async(rx_buf).unwrap();
 
     loop {
-        debug!("waiting for next udp packet");
+        // debug!("waiting for next udp packet");
         match udp
             .recv_from(buf)
             .await
             .inspect_err(|e| error!("Failed to receive UDP packet: {e:?}"))
         {
             Ok((n, _)) if n > 0 => {
-                debug!("Udp recved {n} bytes");
+                // debug!("Udp recved {n} bytes");
                 let buf = &mut buf[..n];
                 let n = dec.decode(buf, pcm, false).unwrap();
                 let pcm: BytesMut = pcm

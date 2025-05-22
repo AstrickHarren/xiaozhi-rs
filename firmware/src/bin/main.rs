@@ -24,6 +24,7 @@ use esp_hal::peripherals::I2S1;
 use esp_hal::time::Rate;
 use esp_hal::timer::timg::TimerGroup;
 use esp_hal::{dma_circular_buffers_chunk_size, Async};
+use esp_println::dbg;
 use esp_println::print;
 use esp_println::println;
 use firmware::p3::P3Reader;
@@ -41,7 +42,7 @@ macro_rules! mk_static {
     }};
 }
 
-static wifi_config_p3: &[u8] = include_bytes!("../../assets/wificonfig.p3");
+static WIFI_CONFIG_P3: &[u8] = include_bytes!("../../assets/wificonfig.p3");
 
 #[esp_hal_embassy::main]
 async fn main(s: Spawner) {
@@ -78,7 +79,7 @@ async fn main(s: Spawner) {
         let i2s = I2s::new(
             peripherals.I2S1,
             esp_hal::i2s::master::Standard::Philips,
-            esp_hal::i2s::master::DataFormat::Data16Channel16,
+            esp_hal::i2s::master::DataFormat::Data32Channel32,
             Rate::from_khz(16),
             peripherals.DMA_CH0,
             rx_d,
@@ -133,10 +134,12 @@ async fn audio_task(
     let mut transfer = i2s_tx.write_dma_circular_async(rx_buf).unwrap();
 
     let mut i2s_zero_bytes = 0;
+    let pcm = &mut [0; 960];
+    let mut dec = Decoder::new(16000, opus::Channels::Mono).unwrap();
     loop {
         debug!("queued {} audio samples", receiver.len());
 
-        let mut data = match receiver.try_receive() {
+        let data = match receiver.try_receive() {
             Ok(p) => p,
             Err(_) if i2s_zero_bytes >= max_silense_size => {
                 i2s_zero_bytes = 0;
@@ -144,11 +147,24 @@ async fn audio_task(
             }
             Err(_) => {
                 i2s_zero_bytes += SILENSE_SIZE;
-                let mut silent = BytesMut::with_capacity(SILENSE_SIZE);
-                silent.resize(SILENSE_SIZE, 0);
-                silent
+                BytesMut::zeroed(SILENSE_SIZE)
             }
         };
+
+        dec.decode(&data, pcm, false).unwrap();
+
+        let volume_factor: i32 = 32112;
+        let mut data: BytesMut = pcm
+            .into_iter()
+            .map(|p| {
+                let temp = *p as i64 * volume_factor as i64;
+                // clamp to i32 range
+                let clamped = temp.max(i32::MIN as i64).min(i32::MAX as i64) as i32;
+                clamped as i32
+            })
+            .flat_map(|x| [0, x])
+            .flat_map(|x| x.to_le_bytes())
+            .collect();
 
         // Push all bytes (audio or silence) into I²S
         while !data.is_empty() {
@@ -159,21 +175,9 @@ async fn audio_task(
 }
 
 async fn local_play(sender: Sender<'static, NoopRawMutex, BytesMut, 10>) {
-    let reader = P3Reader::new(wifi_config_p3);
-    let pcm = &mut [0; 960];
-    let mut dec = Decoder::new(16000, opus::Channels::Mono).unwrap();
+    let reader = P3Reader::new(WIFI_CONFIG_P3);
     for packet in reader {
-        let buf = packet.unwrap();
-        let n = dec.decode(&buf, pcm, false).unwrap();
-
-        let pcm: BytesMut = pcm
-            .into_iter()
-            .take(n)
-            .flat_map(|x| [*x, *x])
-            .flat_map(|x| x.to_le_bytes())
-            .collect();
-        sender.try_send(pcm).unwrap();
-
+        sender.try_send(packet.unwrap()).unwrap();
         Timer::after_millis(55).await;
     }
 }

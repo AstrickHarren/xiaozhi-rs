@@ -10,9 +10,9 @@ import numpy as np
 
 
 async def main():
-    # datas, _ = util.audio_to_data("./assets/中秋月.mp3")
-    datas, _ = util.audio_to_data("./assets/wificonfig.p3");
-    conn = await create_udp(remote_addr=("192.168.176.164", 8080))
+    datas, _ = util.audio_to_data("./assets/中秋月.mp3")
+    # datas, _ = util.audio_to_data("./assets/wificonfig.p3");
+    conn = await create_udp(remote_addr=("172.20.10.7", 8080))
     await sendAudio(conn, datas)
 
 
@@ -27,7 +27,7 @@ def verify():
         print("]")
 
 
-verify()
-# asyncio.run(main())
+# verify()
+asyncio.run(main())
 # print("sleeping")
 time.sleep(1000)

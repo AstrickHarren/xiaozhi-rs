@@ -5,6 +5,7 @@
 use core::ops::Deref;
 
 use bytes::Buf;
+use bytes::BufMut;
 use bytes::BytesMut;
 use embassy_executor::Spawner;
 use embassy_net::udp::PacketMetadata;
@@ -51,26 +52,26 @@ async fn main(s: Spawner) {
     let timg1 = TimerGroup::new(peripherals.TIMG1);
     esp_hal_embassy::init(timg1.timer0);
     esp_alloc::heap_allocator!(size: 100 * 1024);
-    esp_println::logger::init_logger(LevelFilter::Info);
+    esp_println::logger::init_logger(LevelFilter::Debug);
 
     // Start the WI-FI
-    // info!("Connecting to Wifi");
-    // let stack = {
-    //     let cfg = WifiConfig {
-    //         ssid: "Thunderstorm",
-    //         password: "12345678".into(),
-    //         wifi: peripherals.WIFI,
-    //         timg: peripherals.TIMG0,
-    //         rng: peripherals.RNG,
-    //         radio_clk: peripherals.RADIO_CLK,
-    //     };
-    //     let stack = WifiConnection::connect(s, cfg).await;
-    //     info!("Waiting for IP");
-    //     stack.wait_config_up().await;
-    //     let ip = stack.config_v4().unwrap().address;
-    //     info!("Got IP: {}", ip);
-    //     stack
-    // };
+    info!("Connecting to Wifi");
+    let stack = {
+        let cfg = WifiConfig {
+            ssid: "Thunderstorm",
+            password: "12345678".into(),
+            wifi: peripherals.WIFI,
+            timg: peripherals.TIMG0,
+            rng: peripherals.RNG,
+            radio_clk: peripherals.RADIO_CLK,
+        };
+        let stack = WifiConnection::connect(s, cfg).await;
+        info!("Waiting for IP");
+        stack.wait_config_up().await;
+        let ip = stack.config_v4().unwrap().address;
+        info!("Got IP: {}", ip);
+        stack
+    };
 
     // Set up I2S
     let (rx_buf, i2s_tx) = {
@@ -107,8 +108,8 @@ async fn main(s: Spawner) {
     let receiver = ch.receiver();
     s.spawn(audio_task(receiver, i2s_tx, rx_buf)).unwrap();
 
-    // udp_play(stack, sender).await;
-    local_play(sender).await;
+    udp_play(stack, sender).await;
+    // local_play(sender).await;
 
     Timer::after(Duration::from_millis(1000)).await;
     warn!("Sleeping!");
@@ -130,7 +131,7 @@ async fn audio_task(
     rx_buf: &'static mut [u8],
 ) {
     const SILENSE_SIZE: usize = 100;
-    let max_silense_size = rx_buf.len();
+    let max_silense_size = 300;
     let mut transfer = i2s_tx.write_dma_circular_async(rx_buf).unwrap();
 
     let mut i2s_zero_bytes = 0;
@@ -139,18 +140,7 @@ async fn audio_task(
     loop {
         debug!("queued {} audio samples", receiver.len());
 
-        let data = match receiver.try_receive() {
-            Ok(p) => p,
-            Err(_) if i2s_zero_bytes >= max_silense_size => {
-                i2s_zero_bytes = 0;
-                receiver.receive().await
-            }
-            Err(_) => {
-                i2s_zero_bytes += SILENSE_SIZE;
-                BytesMut::zeroed(SILENSE_SIZE)
-            }
-        };
-
+        let data = receiver.receive().await;
         dec.decode(&data, pcm, false).unwrap();
 
         let volume_factor: i32 = 32112;
@@ -193,8 +183,8 @@ async fn udp_play(
     let (rx, tx, rx_meta, tx_meta) = (
         &mut [0; UDP_BUF_SIZE],
         &mut [0; UDP_BUF_SIZE],
-        &mut [PacketMetadata::EMPTY; 2],
-        &mut [PacketMetadata::EMPTY; 2],
+        &mut [PacketMetadata::EMPTY; 10],
+        &mut [PacketMetadata::EMPTY; 10],
     );
     let mut udp = UdpSocket::new(stack, rx_meta, rx, tx_meta, tx);
     let addr = stack.config_v4().unwrap().address.address();
@@ -204,9 +194,6 @@ async fn udp_play(
 
     info!("Waiting for udp packets");
     let buf = &mut [0; 1024];
-    let pcm = &mut [0; 960];
-    let mut dec = Decoder::new(16000, opus::Channels::Mono).unwrap();
-    // let mut transfer = i2s_tx.write_dma_circular_async(rx_buf).unwrap();
 
     loop {
         // debug!("waiting for next udp packet");
@@ -217,15 +204,10 @@ async fn udp_play(
         {
             Ok((n, _)) if n > 0 => {
                 // debug!("Udp recved {n} bytes");
-                let buf = &mut buf[..n];
-                let n = dec.decode(buf, pcm, false).unwrap();
-                let pcm: BytesMut = pcm
-                    .into_iter()
-                    .take(n)
-                    .flat_map(|x| [*x, *x])
-                    .flat_map(|x| x.to_le_bytes())
-                    .collect();
-                sender.try_send(pcm).unwrap();
+                let src = &mut buf[..n];
+                let mut buf: BytesMut = BytesMut::with_capacity(n);
+                buf.put_slice(src);
+                sender.send(buf).await
                 // let pcm =
                 //     unsafe { core::slice::from_raw_parts_mut(pcm.as_mut_ptr() as *mut u8, n * 2) };
 

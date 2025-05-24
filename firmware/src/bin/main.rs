@@ -3,6 +3,7 @@
 #![feature(impl_trait_in_assoc_type)]
 
 use core::ops::Deref;
+use core::ptr::slice_from_raw_parts;
 
 use bytes::Buf;
 use bytes::BufMut;
@@ -19,6 +20,7 @@ use embassy_time::{Duration, Timer};
 use esp_backtrace as _;
 use esp_hal::clock::CpuClock;
 use esp_hal::dma::DmaPriority;
+use esp_hal::i2s::master::I2sRx;
 use esp_hal::i2s::master::{I2s, I2sTx};
 use esp_hal::peripheral::PeripheralRef;
 use esp_hal::peripherals::I2S1;
@@ -73,10 +75,9 @@ async fn main(s: Spawner) {
         stack
     };
 
-    // Set up I2S
-    let (rx_buf, i2s_tx) = {
+    // Set up I2S for speaker
+    let (tx_buf, i2s_tx) = {
         let (rx_buf, rx_d, _, tx_d) = dma_circular_buffers_chunk_size!(1024 * 64, 1024 * 32, 1024);
-        // peripherals.I2S1.register_block().tx_conf();
         let i2s = I2s::new(
             peripherals.I2S1,
             esp_hal::i2s::master::Standard::Philips,
@@ -99,6 +100,30 @@ async fn main(s: Spawner) {
         (rx_buf, i2s_tx)
     };
 
+    let (rx_buf, i2s_rx) = {
+        let (rx_buf, rx_d, _, tx_d) = dma_circular_buffers_chunk_size!(1024 * 64, 1024 * 32, 1024);
+        let i2s = I2s::new(
+            peripherals.I2S0,
+            esp_hal::i2s::master::Standard::Philips,
+            esp_hal::i2s::master::DataFormat::Data32Channel32,
+            Rate::from_khz(16),
+            peripherals.DMA_CH1,
+            rx_d,
+            tx_d,
+        )
+        .into_async();
+        let i2s_rx = {
+            let mut i2s = i2s
+                .i2s_rx
+                .with_ws(peripherals.GPIO4)
+                .with_bclk(peripherals.GPIO5)
+                .with_din(peripherals.GPIO6);
+            i2s.rx_channel.set_priority(DmaPriority::Priority0);
+            i2s.build()
+        };
+        (rx_buf, i2s_rx)
+    };
+
     // Set up channel
     let ch = &*mk_static! {
         Channel::<NoopRawMutex, BytesMut, 10>,
@@ -106,36 +131,39 @@ async fn main(s: Spawner) {
     };
     let sender = ch.sender();
     let receiver = ch.receiver();
-    s.spawn(audio_task(receiver, i2s_tx, rx_buf)).unwrap();
+    s.spawn(speak_task(receiver, i2s_tx, tx_buf)).unwrap();
 
-    udp_play(stack, sender).await;
-    // local_play(sender).await;
+    // udp_play(stack, sender).await;
+    local_play(sender).await;
 
     Timer::after(Duration::from_millis(1000)).await;
     warn!("Sleeping!");
     loop {}
 }
 
-pub struct DummyTimeSource;
-
-impl embedded_sdmmc::TimeSource for DummyTimeSource {
-    fn get_timestamp(&self) -> embedded_sdmmc::Timestamp {
-        embedded_sdmmc::Timestamp::from_fat(0, 0)
-    }
-}
+// async fn listen(i2s_rx: I2sRx<'static, Async>, buf: &mut [u8]) {
+//     let mut transfer = i2s_rx.read_dma_circular_async(buf).unwrap();
+//     loop {
+//         let sample_size = 16000 / 1000 * 30;
+//         // TODO(perf): don't need to zero data here
+//         let mut data = BytesMut::zeroed(sample_size);
+//         transfer.pop(&mut data).await.unwrap();
+//     }
+// }
 
 #[embassy_executor::task]
-async fn audio_task(
+async fn speak_task(
     receiver: Receiver<'static, NoopRawMutex, BytesMut, 10>,
     i2s_tx: I2sTx<'static, Async>,
-    rx_buf: &'static mut [u8],
+    tx_buf: &'static mut [u8],
 ) {
     const SILENSE_SIZE: usize = 100;
     let max_silense_size = 300;
-    let mut transfer = i2s_tx.write_dma_circular_async(rx_buf).unwrap();
+    let mut transfer = i2s_tx.write_dma_circular_async(tx_buf).unwrap();
 
     let mut i2s_zero_bytes = 0;
     let pcm = &mut [0; 960];
+    // FIXME: need to reset decoder every time a new udp stream is received
     let mut dec = Decoder::new(16000, opus::Channels::Mono).unwrap();
     loop {
         debug!("queued {} audio samples", receiver.len());
@@ -143,7 +171,7 @@ async fn audio_task(
         let data = receiver.receive().await;
         dec.decode(&data, pcm, false).unwrap();
 
-        let volume_factor: i32 = 32112;
+        let volume_factor: i32 = 32112; // WARNING: 70% volume
         let mut data: BytesMut = pcm
             .into_iter()
             .map(|p| {
@@ -208,16 +236,6 @@ async fn udp_play(
                 let mut buf: BytesMut = BytesMut::with_capacity(n);
                 buf.put_slice(src);
                 sender.send(buf).await
-                // let pcm =
-                //     unsafe { core::slice::from_raw_parts_mut(pcm.as_mut_ptr() as *mut u8, n * 2) };
-
-                // while transfer.available().await.unwrap() < pcm.len() {}
-                // let n = transfer
-                //     .push(&pcm)
-                //     .await
-                //     .inspect_err(|e| error!("Failed to push buffer: {e:?}"))
-                //     .unwrap();
-                // assert!(n == pcm.len())
             }
             _ => break,
         }

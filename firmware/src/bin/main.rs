@@ -1,6 +1,7 @@
 #![no_std]
 #![no_main]
 #![feature(impl_trait_in_assoc_type)]
+#![feature(array_chunks)]
 
 use core::ops::Deref;
 use core::ptr::slice_from_raw_parts;
@@ -19,7 +20,11 @@ use embassy_sync::channel::Sender;
 use embassy_time::{Duration, Timer};
 use esp_backtrace as _;
 use esp_hal::clock::CpuClock;
+use esp_hal::dma::DmaError;
 use esp_hal::dma::DmaPriority;
+use esp_hal::dma_buffers;
+use esp_hal::dma_circular_buffers;
+use esp_hal::i2s;
 use esp_hal::i2s::master::I2sRx;
 use esp_hal::i2s::master::{I2s, I2sTx};
 use esp_hal::peripheral::PeripheralRef;
@@ -34,6 +39,7 @@ use firmware::p3::P3Reader;
 use firmware::wifi::{WifiConfig, WifiConnection};
 use log::{debug, error, info, warn, LevelFilter};
 use opus::Decoder;
+use opus::Encoder;
 
 // When you are okay with using a nightly compiler, it's better to use https://docs.rs/static_cell/2.1.0/static_cell/macro.make_static.html
 macro_rules! mk_static {
@@ -74,10 +80,22 @@ async fn main(s: Spawner) {
         info!("Got IP: {}", ip);
         stack
     };
+    const UDP_BUF_SIZE: usize = 4096;
+    let (rx, tx, rx_meta, tx_meta) = (
+        &mut [0; UDP_BUF_SIZE],
+        &mut [0; UDP_BUF_SIZE],
+        &mut [PacketMetadata::EMPTY; 10],
+        &mut [PacketMetadata::EMPTY; 10],
+    );
+    let mut udp = UdpSocket::new(stack, rx_meta, rx, tx_meta, tx);
+    let addr = stack.config_v4().unwrap().address.address();
+    udp.bind(IpEndpoint::new(addr.into(), 8080))
+        .inspect_err(|e| error!("Failed to bind UDP socket: {e:?}"))
+        .ok();
 
     // Set up I2S for speaker
     let (tx_buf, i2s_tx) = {
-        let (rx_buf, rx_d, _, tx_d) = dma_circular_buffers_chunk_size!(1024 * 64, 1024 * 32, 1024);
+        let (_, rx_d, tx_buf, tx_d) = dma_buffers!(0, 4092 * 4);
         let i2s = I2s::new(
             peripherals.I2S1,
             esp_hal::i2s::master::Standard::Philips,
@@ -97,11 +115,12 @@ async fn main(s: Spawner) {
             i2s.tx_channel.set_priority(DmaPriority::Priority0);
             i2s.build()
         };
-        (rx_buf, i2s_tx)
+        (tx_buf, i2s_tx)
     };
 
+    // Set up I2S for mic
     let (rx_buf, i2s_rx) = {
-        let (rx_buf, rx_d, _, tx_d) = dma_circular_buffers_chunk_size!(1024 * 64, 1024 * 32, 1024);
+        let (rx_buf, rx_d, _, tx_d) = dma_circular_buffers!(4092 * 10, 0);
         let i2s = I2s::new(
             peripherals.I2S0,
             esp_hal::i2s::master::Standard::Philips,
@@ -131,25 +150,46 @@ async fn main(s: Spawner) {
     };
     let sender = ch.sender();
     let receiver = ch.receiver();
-    s.spawn(speak_task(receiver, i2s_tx, tx_buf)).unwrap();
+    // s.spawn(speak_task(receiver, i2s_tx, tx_buf)).unwrap();
 
-    // udp_play(stack, sender).await;
-    local_play(sender).await;
+    // udp_play(&udp, sender).await;
+    // local_play(sender).await;
+    listen(&udp, "172.20.10.8:8080".parse().unwrap(), i2s_rx, rx_buf).await;
 
     Timer::after(Duration::from_millis(1000)).await;
     warn!("Sleeping!");
     loop {}
 }
 
-// async fn listen(i2s_rx: I2sRx<'static, Async>, buf: &mut [u8]) {
-//     let mut transfer = i2s_rx.read_dma_circular_async(buf).unwrap();
-//     loop {
-//         let sample_size = 16000 / 1000 * 30;
-//         // TODO(perf): don't need to zero data here
-//         let mut data = BytesMut::zeroed(sample_size);
-//         transfer.pop(&mut data).await.unwrap();
-//     }
-// }
+async fn listen(
+    udp: &UdpSocket<'_>,
+    remote: IpEndpoint,
+    i2s_rx: I2sRx<'static, Async>,
+    buf: &mut [u8],
+) {
+    let enc = Encoder::new(16000, opus::Channels::Mono, opus::Application::Audio).unwrap();
+    let mut data = [0; 4096];
+    let mut transfer = i2s_rx.read_dma_circular_async(buf).unwrap();
+    loop {
+        use esp_hal::i2s::master::Error;
+        match transfer.pop(&mut data).await {
+            Ok(n) => {
+                // INMP441 puts data into 24bits
+                let data = data[..n]
+                    .array_chunks::<4>()
+                    .step_by(2) // skip right channel
+                    .map(|c| i32::from_le_bytes(*c) >> 12) // shift right by 8 bits (Big Endian)
+                    .map(|c| c.clamp(i16::MIN as _, i16::MAX as _) as i16);
+
+                let data: BytesMut = data.flat_map(|b| b.to_le_bytes()).collect();
+                udp.send_to(&data, remote).await.unwrap();
+                debug!("sent udp to {:?}: {} bytes", remote, data.len());
+            }
+            Err(Error::DmaError(DmaError::Late)) => warn!("Dma late for mic"),
+            Err(e) => panic!("Unexpected error: {e:?}"),
+        }
+    }
+}
 
 #[embassy_executor::task]
 async fn speak_task(
@@ -168,8 +208,10 @@ async fn speak_task(
     loop {
         debug!("queued {} audio samples", receiver.len());
 
-        let data = receiver.receive().await;
-        dec.decode(&data, pcm, false).unwrap();
+        match receiver.try_receive() {
+            Ok(data) => dec.decode(&data, pcm, false).unwrap(),
+            Err(_) => dec.decode(&[], pcm, false).unwrap(),
+        };
 
         let volume_factor: i32 = 32112; // WARNING: 70% volume
         let mut data: BytesMut = pcm
@@ -201,28 +243,14 @@ async fn local_play(sender: Sender<'static, NoopRawMutex, BytesMut, 10>) {
 }
 
 async fn udp_play(
-    stack: Stack<'_>,
+    udp: &UdpSocket<'_>,
     sender: Sender<'static, NoopRawMutex, BytesMut, 10>,
     // i2s_tx: I2sTx<'_, Async>,
     // rx_buf: &mut [u8],
 ) {
-    // UDP get wav file
-    const UDP_BUF_SIZE: usize = 4096;
-    let (rx, tx, rx_meta, tx_meta) = (
-        &mut [0; UDP_BUF_SIZE],
-        &mut [0; UDP_BUF_SIZE],
-        &mut [PacketMetadata::EMPTY; 10],
-        &mut [PacketMetadata::EMPTY; 10],
-    );
-    let mut udp = UdpSocket::new(stack, rx_meta, rx, tx_meta, tx);
-    let addr = stack.config_v4().unwrap().address.address();
-    udp.bind(IpEndpoint::new(addr.into(), 8080))
-        .inspect_err(|e| error!("Failed to bind UDP socket: {e:?}"))
-        .ok();
-
-    info!("Waiting for udp packets");
     let buf = &mut [0; 1024];
 
+    info!("Waiting for udp packets");
     loop {
         // debug!("waiting for next udp packet");
         match udp

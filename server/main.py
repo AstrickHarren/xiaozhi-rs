@@ -2,6 +2,7 @@ import asyncio
 import time
 
 import opuslib_next
+import sounddevice as sd
 
 from audio import sendAudio
 from udp import create_udp
@@ -26,8 +27,22 @@ def verify():
             print(i, end=" ")
         print("]")
 
+async def receive():
+    udp = await create_udp(local_addr=("172.20.10.8", 8080))
+    print("start receiving")
+    stream = sd.OutputStream(
+            samplerate=16000,
+            channels=1,
+            dtype='int16'
+        )
+    stream.start()
+
+    while True:
+        data, addr = await udp.recv()
+        print(f"Received {len(data)} bytes from {addr}")
+        stream.write(np.frombuffer(data, dtype=np.int16))
 
 # verify()
-asyncio.run(main())
+asyncio.run(receive())
 # print("sleeping")
 time.sleep(1000)

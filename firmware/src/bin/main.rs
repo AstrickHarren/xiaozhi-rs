@@ -9,6 +9,7 @@ use core::ptr::slice_from_raw_parts;
 use bytes::Buf;
 use bytes::BufMut;
 use bytes::BytesMut;
+use either::Either;
 use embassy_executor::Spawner;
 use embassy_net::udp::PacketMetadata;
 use embassy_net::udp::UdpSocket;
@@ -24,10 +25,12 @@ use esp_hal::dma::DmaError;
 use esp_hal::dma::DmaPriority;
 use esp_hal::dma_buffers;
 use esp_hal::dma_circular_buffers;
+use esp_hal::gpio::NoPin;
 use esp_hal::i2s;
 use esp_hal::i2s::master::I2sRx;
 use esp_hal::i2s::master::{I2s, I2sTx};
 use esp_hal::peripheral::PeripheralRef;
+use esp_hal::peripherals;
 use esp_hal::peripherals::I2S1;
 use esp_hal::time::Rate;
 use esp_hal::timer::timg::TimerGroup;
@@ -35,6 +38,7 @@ use esp_hal::{dma_circular_buffers_chunk_size, Async};
 use esp_println::dbg;
 use esp_println::print;
 use esp_println::println;
+use firmware::audio::I2sConfig;
 use firmware::p3::P3Reader;
 use firmware::wifi::{WifiConfig, WifiConnection};
 use log::{debug, error, info, warn, LevelFilter};
@@ -48,6 +52,18 @@ macro_rules! mk_static {
         #[deny(unused_attributes)]
         let x = STATIC_CELL.uninit().write(($val));
         x
+    }};
+}
+
+macro_rules! mk_ch {
+    ($val:literal) => {{
+        let ch = &*mk_static! {
+            Channel::<NoopRawMutex, BytesMut, $val>,
+            Channel::new()
+        };
+        let sender = ch.sender();
+        let receiver = ch.receiver();
+        (sender, receiver)
     }};
 }
 
@@ -94,66 +110,29 @@ async fn main(s: Spawner) {
         .ok();
 
     // Set up I2S for speaker
-    let (tx_buf, i2s_tx) = {
-        let (_, rx_d, tx_buf, tx_d) = dma_buffers!(0, 4092 * 4);
-        let i2s = I2s::new(
-            peripherals.I2S1,
-            esp_hal::i2s::master::Standard::Philips,
-            esp_hal::i2s::master::DataFormat::Data32Channel32,
-            Rate::from_khz(16),
-            peripherals.DMA_CH0,
-            rx_d,
-            tx_d,
-        )
-        .into_async();
-        let i2s_tx = {
-            let mut i2s = i2s
-                .i2s_tx
-                .with_ws(peripherals.GPIO16)
-                .with_bclk(peripherals.GPIO15)
-                .with_dout(peripherals.GPIO7);
-            i2s.tx_channel.set_priority(DmaPriority::Priority0);
-            i2s.build()
-        };
-        (tx_buf, i2s_tx)
-    };
+    let (tx_buf, i2s_tx) = I2sConfig {
+        i2s: peripherals.I2S0,
+        dma: peripherals.DMA_CH0,
+        bclk: peripherals.GPIO15,
+        ws: peripherals.GPIO16,
+    }
+    .build_output(peripherals.GPIO7);
 
     // Set up I2S for mic
-    let (rx_buf, i2s_rx) = {
-        let (rx_buf, rx_d, _, tx_d) = dma_circular_buffers!(4092 * 10, 0);
-        let i2s = I2s::new(
-            peripherals.I2S0,
-            esp_hal::i2s::master::Standard::Philips,
-            esp_hal::i2s::master::DataFormat::Data32Channel32,
-            Rate::from_khz(16),
-            peripherals.DMA_CH1,
-            rx_d,
-            tx_d,
-        )
-        .into_async();
-        let i2s_rx = {
-            let mut i2s = i2s
-                .i2s_rx
-                .with_ws(peripherals.GPIO4)
-                .with_bclk(peripherals.GPIO5)
-                .with_din(peripherals.GPIO6);
-            i2s.rx_channel.set_priority(DmaPriority::Priority0);
-            i2s.build()
-        };
-        (rx_buf, i2s_rx)
-    };
+    let (rx_buf, i2s_rx) = I2sConfig {
+        i2s: peripherals.I2S1,
+        dma: peripherals.DMA_CH1,
+        ws: peripherals.GPIO4,
+        bclk: peripherals.GPIO5,
+    }
+    .build_input(peripherals.GPIO6);
 
-    // Set up channel
-    let ch = &*mk_static! {
-        Channel::<NoopRawMutex, BytesMut, 10>,
-        Channel::new()
-    };
-    let sender = ch.sender();
-    let receiver = ch.receiver();
+    let (sender, receiver) = mk_ch!(10);
+
     // s.spawn(speak_task(receiver, i2s_tx, tx_buf)).unwrap();
-
     // udp_play(&udp, sender).await;
     // local_play(sender).await;
+
     listen(&udp, "172.20.10.8:8080".parse().unwrap(), i2s_rx, rx_buf).await;
 
     Timer::after(Duration::from_millis(1000)).await;
@@ -178,7 +157,7 @@ async fn listen(
                 let data = data[..n]
                     .array_chunks::<4>()
                     .step_by(2) // skip right channel
-                    .map(|c| i32::from_le_bytes(*c) >> 12) // shift right by 8 bits (Big Endian)
+                    .map(|c| i32::from_le_bytes(*c) >> 12) // shift right by 12 bits (not sure why)
                     .map(|c| c.clamp(i16::MIN as _, i16::MAX as _) as i16);
 
                 let data: BytesMut = data.flat_map(|b| b.to_le_bytes()).collect();

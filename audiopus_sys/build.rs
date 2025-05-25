@@ -18,7 +18,6 @@ const fn rustc_linking_word(is_static_link: bool) -> &'static str {
 #[cfg(feature = "generate_binding")]
 fn generate_binding() {
     const FEATURES: &'static str = r#"
-#![feature(prelude_2024)]
 #![no_std]
     "#;
     const ALLOW_UNCONVENTIONALS: &'static str = "#![allow(non_upper_case_globals)]\n\
@@ -41,6 +40,11 @@ use core::prelude::rust_2024::derive;
         .raw_line(ALLOW_UNCONVENTIONALS)
         .raw_line(USE_CORE)
         .default_macro_constant_type(bindgen::MacroTypeVariation::Signed)
+        // TODO: use feature for target selection, arbitraged here because we need
+        // to support compile xtensa in firmware but clang cannot find stdint with xtensa
+        // target. Since this crate only generates bingings, it's fine to use other targets
+        // than xtensa.
+        .clang_arg("--target=arm-unknown-linux-gnueabihf")
         .generate()
         .expect("Unable to generate binding");
 

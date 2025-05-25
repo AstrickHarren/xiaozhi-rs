@@ -5,8 +5,13 @@ license = "ISC"
 repository = "https://github.com/lakelezz/audiopus_sys.git"
 authors = ["Lakelezz <lakelezz@protonmail.ch>"]
 keywords = ["audio", "opus", "codec"]
-categories = ["api-bindings", "compression", "encoding",
-	"multimedia::audio", "multimedia::encoding"]
+categories = [
+    "api-bindings",
+    "compression",
+    "encoding",
+    "multimedia::audio",
+    "multimedia::encoding",
+]
 description = "FFI-Binding to Opus, dynamically or statically linked for Windows and UNIX."
 readme = "README.md"
 documentation = "https://docs.rs/audiopus_sys"

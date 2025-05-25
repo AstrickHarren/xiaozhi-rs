@@ -1,5 +1,24 @@
 {
   "lsp": {
+    "rust-analyzer": {
+      // "binary": {
+      //   "path": "/Users/astrick/.cargo/bin/rust-analyzer"
+      // },
+      "initialization_options": {
+        "cargo": {
+          "allTargets": false,
+          "target": "xtensa-esp32s3-none-elf",
+          "extraEnv": {
+            "RUSTUP_TOOLCHAIN": "esp"
+          }
+        },
+        "check": {
+          "extraEnv": {
+            "RUSTUP_TOOLCHAIN": "esp"
+          }
+        }
+      }
+    },
     "pyright": {
       "settings": {
         "python": {

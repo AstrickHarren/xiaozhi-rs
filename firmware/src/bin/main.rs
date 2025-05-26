@@ -129,11 +129,11 @@ async fn main(s: Spawner) {
 
     let (sender, receiver) = mk_ch!(10);
 
-    // s.spawn(speak_task(receiver, i2s_tx, tx_buf)).unwrap();
-    // udp_play(&udp, sender).await;
+    s.spawn(speak_task(receiver, i2s_tx, tx_buf)).unwrap();
+    udp_play(&udp, sender).await;
     // local_play(sender).await;
 
-    listen(&udp, "172.20.10.8:8080".parse().unwrap(), i2s_rx, rx_buf).await;
+    // listen(&udp, "172.20.10.8:8080".parse().unwrap(), i2s_rx, rx_buf).await;
 
     Timer::after(Duration::from_millis(1000)).await;
     warn!("Sleeping!");
@@ -207,6 +207,7 @@ async fn speak_task(
 
         // Push all bytes (audio or silence) into I²S
         while !data.is_empty() {
+            dbg!(data.len());
             let n = transfer.push(&data).await.unwrap();
             data.advance(n);
         }

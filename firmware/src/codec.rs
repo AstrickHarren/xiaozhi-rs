@@ -1,5 +1,3 @@
-use core::fmt::Debug;
-
 use bytes::{Buf, BytesMut};
 use embassy_executor::Spawner;
 use embassy_sync::{
@@ -11,10 +9,8 @@ use esp_hal::{
     i2s::master::{I2sRx, I2sTx},
     Async,
 };
-use esp_println::dbg;
 use log::{debug, warn};
-use opus::{Decoder, Encoder};
-use static_cell::make_static;
+use opus::Decoder;
 
 // When you are okay with using a nightly compiler, it's better to use https://docs.rs/static_cell/2.1.0/static_cell/macro.make_static.html
 macro_rules! mk_static {
@@ -55,8 +51,8 @@ impl I2sSimplex {
     pub fn new(s: &Spawner, config: I2sSimplexConfig) -> Self {
         let (speaker_tx, speaker_rx) = mk_ch!(10);
         let (mic_tx, mic_rx) = mk_ch!(10);
-        // s.spawn(listen_task(mic_tx, config.mic_rx, config.mic_buf))
-        //     .unwrap();
+        s.spawn(listen_task(mic_tx, config.mic_rx, config.mic_buf))
+            .unwrap();
         s.spawn(speak_task(
             speaker_rx,
             config.speaker_tx,

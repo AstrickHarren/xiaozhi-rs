@@ -1,8 +1,7 @@
 use core::convert::Infallible;
 
-use bytes::{Buf, Bytes, BytesMut};
-use embedded_io::{BufRead, Read, ReadExactError};
-use esp_println::println;
+use bytes::BytesMut;
+use embedded_io::{Read, ReadExactError};
 
 pub struct P3Reader<'a> {
     data: &'a [u8],

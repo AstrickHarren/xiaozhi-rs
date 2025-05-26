@@ -10,7 +10,7 @@ import util
 import numpy as np
 
 
-async def main():
+async def send():
     datas, _ = util.audio_to_data("./assets/中秋月.mp3")
     # datas, _ = util.audio_to_data("./assets/wificonfig.p3");
     conn = await create_udp(remote_addr=("172.20.10.7", 8080))
@@ -43,6 +43,6 @@ async def receive():
         stream.write(np.frombuffer(data, dtype=np.int16))
 
 # verify()
-asyncio.run(receive())
+asyncio.run(send())
 # print("sleeping")
 time.sleep(1000)

@@ -1,7 +1,7 @@
-PYTHON := "./server/venv/bin/python3"
+PYTHON := "./venv/bin/python3"
 
 server:
-    {{PYTHON}} server/main.py
+    cd server && {{PYTHON}} main.py
 
 run:
     #! /bin/sh

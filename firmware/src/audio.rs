@@ -22,30 +22,25 @@ where
     WS: Peripheral<P: PeripheralOutput> + 'static,
     BCLK: Peripheral<P: PeripheralOutput> + 'static,
 {
-    pub fn build_i2s(
-        i2s: impl Peripheral<P: RegisterAccess> + 'static,
-        dma: impl Peripheral<P: DmaChannelFor<AnyI2s>> + 'static,
-    ) -> (I2s<'static, Async>, &'static mut [u8], &'static mut [u8]) {
-        let (rx_buf, rx_d, tx_buf, tx_d) = dma_circular_buffers!(4092 * 10, 0);
-        let i2s = I2s::new(
-            i2s,
-            esp_hal::i2s::master::Standard::Philips,
-            esp_hal::i2s::master::DataFormat::Data32Channel32,
-            Rate::from_khz(16),
-            dma,
-            rx_d,
-            tx_d,
-        )
-        .into_async();
-        (i2s, rx_buf, tx_buf)
-    }
-
     pub fn build_input(
         self,
         din: impl Peripheral<P: PeripheralInput> + 'static,
     ) -> (&'static mut [u8], I2sRx<'static, Async>) {
         {
-            let (i2s, rx_buf, _) = Self::build_i2s(self.i2s, self.dma);
+            let (i2s, rx_buf) = {
+                let (rx_buf, rx_d, _, tx_d) = dma_circular_buffers!(4092 * 10, 0);
+                let i2s = I2s::new(
+                    self.i2s,
+                    esp_hal::i2s::master::Standard::Philips,
+                    esp_hal::i2s::master::DataFormat::Data32Channel32,
+                    Rate::from_khz(16),
+                    self.dma,
+                    rx_d,
+                    tx_d,
+                )
+                .into_async();
+                (i2s, rx_buf)
+            };
             let i2s_rx = {
                 let mut i2s = i2s
                     .i2s_rx
@@ -64,7 +59,20 @@ where
         dout: impl Peripheral<P: PeripheralOutput> + 'static,
     ) -> (&'static mut [u8], I2sTx<'static, Async>) {
         {
-            let (i2s, _, tx_buf) = Self::build_i2s(self.i2s, self.dma);
+            let (i2s, tx_buf) = {
+                let (_, rx_d, tx_buf, tx_d) = dma_circular_buffers!(0, 4092 * 10);
+                let i2s = I2s::new(
+                    self.i2s,
+                    esp_hal::i2s::master::Standard::Philips,
+                    esp_hal::i2s::master::DataFormat::Data32Channel32,
+                    Rate::from_khz(16),
+                    self.dma,
+                    rx_d,
+                    tx_d,
+                )
+                .into_async();
+                (i2s, tx_buf)
+            };
             let i2s_tx = {
                 let mut i2s = i2s
                     .i2s_tx

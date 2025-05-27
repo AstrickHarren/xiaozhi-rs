@@ -18,22 +18,6 @@ use rust_mqtt::{
 
 use crate::Protocol;
 
-// When you are okay with using a nightly compiler, it's better to use https://docs.rs/static_cell/2.1.0/static_cell/macro.make_static.html
-macro_rules! mk_static {
-    ($t:ty,$val:expr) => {{
-        static STATIC_CELL: static_cell::StaticCell<$t> = static_cell::StaticCell::new();
-        #[deny(unused_attributes)]
-        let x = STATIC_CELL.uninit().write(($val));
-        x
-    }};
-}
-
-macro_rules! mk_buf {
-    [ $ty:ty , $filler:expr  ;$size:expr ] => {
-        mk_static!([$ty; $size], [$filler; $size])
-    };
-}
-
 const TCP_BUF_SIZE: usize = 1024;
 const TCP_QUEUE_SIZE: usize = 3;
 const MQTT_MAX_PROPERTIES: usize = 5;

@@ -9,6 +9,8 @@ use embassy_futures::select::select;
 
 pub mod audio;
 pub mod codec;
+#[macro_use]
+mod r#macro;
 pub mod p3;
 pub mod proto;
 pub mod util;

@@ -25,7 +25,7 @@ async fn main(s: Spawner) {
     let peripherals = esp_hal::init(config);
     let timg1 = TimerGroup::new(peripherals.TIMG1);
     esp_hal_embassy::init(timg1.timer0);
-    esp_alloc::heap_allocator!(size: 100 * 1024);
+    esp_alloc::heap_allocator!(size: 150 * 1024);
     esp_println::logger::init_logger(LevelFilter::Debug);
 
     let proto = {
@@ -76,10 +76,6 @@ async fn main(s: Spawner) {
     };
 
     let mut robot = Robot::new(proto, codec);
-    robot.debug_set_state(RobotState::Speaking);
+    robot.debug_set_state(RobotState::Listening);
     robot.main_loop().await;
-
-    Timer::after(Duration::from_millis(1000)).await;
-    warn!("Sleeping!");
-    loop {}
 }

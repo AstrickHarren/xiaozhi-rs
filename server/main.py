@@ -29,6 +29,7 @@ def verify():
 
 async def receive():
     udp = await create_udp(local_addr=("172.20.10.8", 8080))
+    dec = opuslib_next.Decoder(16000, 1)
     print("start receiving")
     stream = sd.OutputStream(
             samplerate=16000,
@@ -40,9 +41,10 @@ async def receive():
     while True:
         data, addr = await udp.recv()
         print(f"Received {len(data)} bytes from {addr}")
+        data = dec.decode(data, 960)
         stream.write(np.frombuffer(data, dtype=np.int16))
 
 # verify()
-asyncio.run(send())
+asyncio.run(receive())
 # print("sleeping")
 time.sleep(1000)

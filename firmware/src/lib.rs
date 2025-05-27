@@ -11,6 +11,7 @@ pub mod audio;
 pub mod codec;
 pub mod p3;
 pub mod proto;
+pub mod util;
 pub mod wifi;
 
 pub enum RobotState {

@@ -46,7 +46,7 @@ async fn main(s: Spawner) {
             info!("Got IP: {}", ip);
             stack
         };
-        MqttUdp::build(stack, "172.20.10.8:8080".parse().unwrap())
+        MqttUdp::build(stack, "172.20.10.8:8080".parse().unwrap()).await
     };
 
     let codec = {

@@ -10,6 +10,10 @@ run *ARGS:
     ESP_LOG=info
     ARGS=""
     for i in {{ARGS}}; do
+      if [[ "$i" == "trace" ]]; then
+        ESP_LOG=trace;
+        break;
+      fi
       if [[ "$i" == "debug" ]]; then
         ESP_LOG=debug;
         break;

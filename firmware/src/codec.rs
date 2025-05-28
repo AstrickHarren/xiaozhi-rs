@@ -9,7 +9,8 @@ use esp_hal::{
     i2s::master::{I2sRx, I2sTx},
     Async,
 };
-use log::{debug, error, info, trace, warn};
+use esp_println::dbg;
+use log::{error, info, trace, warn};
 use opus::{Decoder, Encoder};
 
 use crate::{mk_ch, util::BytesMutExtend, Audio};

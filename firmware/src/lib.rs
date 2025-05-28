@@ -67,7 +67,7 @@ where
     }
 
     // TODO: visable only for debug purpose
-    pub fn set_state(&mut self, state: RobotState) {
+    pub async fn set_state(&mut self, state: RobotState) {
         info!("Robot state: {:?}", state);
         self.state = state;
     }
@@ -84,9 +84,9 @@ where
 
     async fn idle(&mut self) -> Result<(), P::Error> {
         match self.proto.recv_cmd().await? {
-            Command::Stop => self.set_state(RobotState::Idle),
-            Command::Speak => self.set_state(RobotState::Speaking),
-            Command::Listen => self.set_state(RobotState::Listening),
+            Command::Stop => self.set_state(RobotState::Idle).await,
+            Command::Speak => self.set_state(RobotState::Speaking).await,
+            Command::Listen => self.set_state(RobotState::Listening).await,
         };
         Ok(())
     }
@@ -96,9 +96,9 @@ where
         match select(self.proto.recv_cmd(), self.proto.recv_bin()).await {
             First(cmd) => match cmd? {
                 // TODO: reset codec here
-                Command::Stop => self.set_state(RobotState::Idle),
-                Command::Speak => self.set_state(RobotState::Speaking),
-                Command::Listen => self.set_state(RobotState::Listening),
+                Command::Stop => self.set_state(RobotState::Idle).await,
+                Command::Speak => self.set_state(RobotState::Speaking).await,
+                Command::Listen => self.set_state(RobotState::Listening).await,
             },
             Second(bin) => self.codec.play(&bin?).await.unwrap(),
         };
@@ -110,9 +110,9 @@ where
         use embassy_futures::select::Either::*;
         match select(self.proto.recv_cmd(), self.codec.record()).await {
             First(cmd) => match cmd? {
-                Command::Stop => self.set_state(RobotState::Idle),
-                Command::Speak => self.set_state(RobotState::Speaking),
-                Command::Listen => self.set_state(RobotState::Listening),
+                Command::Stop => self.set_state(RobotState::Idle).await,
+                Command::Speak => self.set_state(RobotState::Speaking).await,
+                Command::Listen => self.set_state(RobotState::Listening).await,
             },
             Second(bin) => self.proto.send_bin(&bin.unwrap()).await.unwrap(),
         }

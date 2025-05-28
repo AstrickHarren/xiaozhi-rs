@@ -7,6 +7,7 @@ use embassy_net::{
     IpEndpoint, Stack,
 };
 use embedded_nal_async::TcpConnect;
+use esp_println::dbg;
 use log::error;
 use rust_mqtt::{
     client::{
@@ -18,29 +19,29 @@ use rust_mqtt::{
 
 use crate::Protocol;
 
-const TCP_BUF_SIZE: usize = 1024;
+const TCP_BUF_SIZE: usize = 512;
 const TCP_QUEUE_SIZE: usize = 3;
 const MQTT_MAX_PROPERTIES: usize = 5;
-const UDP_BUF_SIZE: usize = 4096;
+const UDP_BUF_SIZE: usize = 1024;
 
 pub struct MqttUdp {
     socket: UdpSocket<'static>,
-    // mqtt: RefCell<
-    //     MqttClient<
-    //         'static,
-    //         TcpConnection<'static, TCP_QUEUE_SIZE, TCP_BUF_SIZE, TCP_BUF_SIZE>,
-    //         MQTT_MAX_PROPERTIES,
-    //         CountingRng,
-    //     >,
-    // >,
+    mqtt: RefCell<
+        MqttClient<
+            'static,
+            TcpConnection<'static, TCP_QUEUE_SIZE, TCP_BUF_SIZE, TCP_BUF_SIZE>,
+            MQTT_MAX_PROPERTIES,
+            CountingRng,
+        >,
+    >,
     remote: IpEndpoint,
 }
 
 impl MqttUdp {
     pub async fn build(stack: Stack<'static>, remote: IpEndpoint) -> Self {
         // Start MQTT
-        // let mut mqtt = Self::connect_mqtt(stack, remote).await;
-        // mqtt.connect_to_broker().await.unwrap();
+        let mut mqtt = Self::connect_mqtt(stack, remote).await;
+        mqtt.connect_to_broker().await.unwrap();
 
         // Start UDP
         let (rx, tx, rx_meta, tx_meta) = (
@@ -57,7 +58,7 @@ impl MqttUdp {
 
         Self {
             socket: udp,
-            // mqtt: mqtt.into(),
+            mqtt: mqtt.into(),
             remote,
         }
     }
@@ -87,6 +88,8 @@ impl MqttUdp {
                 CountingRng(12345),
             );
             mqtt_client_config.add_client_id("oidfsduidiodsuio");
+            mqtt_client_config.add_username("alice");
+            mqtt_client_config.add_password("123");
 
             MqttClient::new(
                 connection,

@@ -38,7 +38,8 @@ impl WifiConnection {
         let (stack, runner) = embassy_net::new(
             ifaces.sta,
             embassy_net::Config::dhcpv4(Default::default()),
-            mk_static!(StackResources<3>, StackResources::<3>::new()),
+            // TODO: figure out how many resources are needed
+            mk_static!(StackResources<10>, StackResources::new()),
             seed,
         );
 

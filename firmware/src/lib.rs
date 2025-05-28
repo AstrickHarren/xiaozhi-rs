@@ -6,6 +6,7 @@ use core::{fmt::Debug, future::Future};
 
 use bytes::BytesMut;
 use embassy_futures::select::select;
+use log::info;
 
 pub mod audio;
 pub mod codec;
@@ -16,6 +17,7 @@ pub mod proto;
 pub mod util;
 pub mod wifi;
 
+#[derive(Debug)]
 pub enum RobotState {
     Idle,
     Speaking,
@@ -64,8 +66,9 @@ where
         }
     }
 
-    // TODO: only for debug purpose
-    pub fn debug_set_state(&mut self, state: RobotState) {
+    // TODO: visable only for debug purpose
+    pub fn set_state(&mut self, state: RobotState) {
+        info!("Robot state: {:?}", state);
         self.state = state;
     }
 
@@ -81,9 +84,9 @@ where
 
     async fn idle(&mut self) -> Result<(), P::Error> {
         match self.proto.recv_cmd().await? {
-            Command::Stop => self.state = RobotState::Idle,
-            Command::Speak => self.state = RobotState::Speaking,
-            Command::Listen => self.state = RobotState::Listening,
+            Command::Stop => self.set_state(RobotState::Idle),
+            Command::Speak => self.set_state(RobotState::Speaking),
+            Command::Listen => self.set_state(RobotState::Listening),
         };
         Ok(())
     }
@@ -93,9 +96,9 @@ where
         match select(self.proto.recv_cmd(), self.proto.recv_bin()).await {
             First(cmd) => match cmd? {
                 // TODO: reset codec here
-                Command::Stop => self.state = RobotState::Idle,
-                Command::Speak => self.state = RobotState::Speaking,
-                Command::Listen => self.state = RobotState::Listening,
+                Command::Stop => self.set_state(RobotState::Idle),
+                Command::Speak => self.set_state(RobotState::Speaking),
+                Command::Listen => self.set_state(RobotState::Listening),
             },
             Second(bin) => self.codec.play(&bin?).await.unwrap(),
         };
@@ -107,9 +110,9 @@ where
         use embassy_futures::select::Either::*;
         match select(self.proto.recv_cmd(), self.codec.record()).await {
             First(cmd) => match cmd? {
-                Command::Stop => self.state = RobotState::Idle,
-                Command::Speak => self.state = RobotState::Speaking,
-                Command::Listen => self.state = RobotState::Listening,
+                Command::Stop => self.set_state(RobotState::Idle),
+                Command::Speak => self.set_state(RobotState::Speaking),
+                Command::Listen => self.set_state(RobotState::Listening),
             },
             Second(bin) => self.proto.send_bin(&bin.unwrap()).await.unwrap(),
         }

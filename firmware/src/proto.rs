@@ -25,22 +25,22 @@ const UDP_BUF_SIZE: usize = 4096;
 
 pub struct MqttUdp {
     socket: UdpSocket<'static>,
-    mqtt: RefCell<
-        MqttClient<
-            'static,
-            TcpConnection<'static, TCP_QUEUE_SIZE, TCP_BUF_SIZE, TCP_BUF_SIZE>,
-            MQTT_MAX_PROPERTIES,
-            CountingRng,
-        >,
-    >,
+    // mqtt: RefCell<
+    //     MqttClient<
+    //         'static,
+    //         TcpConnection<'static, TCP_QUEUE_SIZE, TCP_BUF_SIZE, TCP_BUF_SIZE>,
+    //         MQTT_MAX_PROPERTIES,
+    //         CountingRng,
+    //     >,
+    // >,
     remote: IpEndpoint,
 }
 
 impl MqttUdp {
     pub async fn build(stack: Stack<'static>, remote: IpEndpoint) -> Self {
         // Start MQTT
-        let mut mqtt = Self::connect_mqtt(stack, remote).await;
-        mqtt.connect_to_broker().await.unwrap();
+        // let mut mqtt = Self::connect_mqtt(stack, remote).await;
+        // mqtt.connect_to_broker().await.unwrap();
 
         // Start UDP
         let (rx, tx, rx_meta, tx_meta) = (
@@ -57,7 +57,7 @@ impl MqttUdp {
 
         Self {
             socket: udp,
-            mqtt: mqtt.into(),
+            // mqtt: mqtt.into(),
             remote,
         }
     }
@@ -104,13 +104,13 @@ impl Protocol for MqttUdp {
     type Error = ();
 
     async fn recv_cmd(&self) -> Result<crate::Command, Self::Error> {
-        match self.mqtt.borrow_mut().receive_message().await {
-            Ok((topic, payload)) => todo!(),
-            Err(e) => {
-                error!("mqtt: {e:?}");
-            }
-        }
-        todo!()
+        // match self.mqtt.borrow_mut().receive_message().await {
+        //     Ok((topic, payload)) => todo!(),
+        //     Err(e) => {
+        //         error!("mqtt: {e:?}");
+        //     }
+        // }
+        future::pending().await
     }
 
     async fn send_bin(&self, data: &[u8]) -> Result<(), Self::Error> {

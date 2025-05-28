@@ -9,7 +9,7 @@ use esp_hal::{
     i2s::master::{I2sRx, I2sTx},
     Async,
 };
-use log::{debug, error, warn};
+use log::{debug, error, info, trace, warn};
 use opus::{Decoder, Encoder};
 
 use crate::{mk_ch, util::BytesMutExtend, Audio};
@@ -62,6 +62,7 @@ async fn listen_task(
     i2s_rx: I2sRx<'static, Async>,
     rx_buf: &'static mut [u8],
 ) {
+    info!("start continuous i2s mic");
     const FRAME_SIZE: usize = 960;
     let mut data = [0; 1024 * 5];
     let mut remain = BytesMut::new();
@@ -102,13 +103,14 @@ async fn speak_task(
     i2s_tx: I2sTx<'static, Async>,
     tx_buf: &'static mut [u8],
 ) {
+    info!("start continuous i2s speaker");
     let mut transfer = i2s_tx.write_dma_circular_async(tx_buf).unwrap();
 
     let pcm = &mut [0; 960];
     // FIXME: need to reset decoder every time a new udp stream is received
     let mut dec = Decoder::new(16000, opus::Channels::Mono).unwrap();
     loop {
-        debug!("SPEAK: queued {} audio samples", receiver.len());
+        trace!("SPEAK: queued {} audio samples", receiver.len());
 
         match receiver.try_receive() {
             Ok(data) => dec.decode(&data, pcm, false).unwrap(),

@@ -1,3 +1,4 @@
+#![feature(inherent_str_constructors)]
 #![feature(impl_trait_in_assoc_type)]
 #![feature(array_chunks)]
 #![no_std]
@@ -7,6 +8,7 @@ use core::{fmt::Debug, future::Future};
 use bytes::BytesMut;
 use embassy_futures::select::select;
 use log::info;
+use serde::{Deserialize, Serialize};
 
 pub mod audio;
 pub mod codec;
@@ -24,6 +26,7 @@ pub enum RobotState {
     Listening,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
 pub enum Command {
     Stop,
     Speak,

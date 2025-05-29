@@ -1,4 +1,9 @@
-use core::{cell::RefCell, future, net::SocketAddr, slice};
+use core::{
+    cell::RefCell,
+    future::{self, pending},
+    net::SocketAddr,
+    slice,
+};
 
 use bytes::{BufMut, BytesMut};
 use embassy_net::{
@@ -7,8 +12,8 @@ use embassy_net::{
     IpEndpoint, Stack,
 };
 use embedded_nal_async::TcpConnect;
-use esp_println::dbg;
-use log::error;
+use esp_println::{dbg, println};
+use log::{debug, error, info};
 use rust_mqtt::{
     client::{
         client::MqttClient,
@@ -16,13 +21,14 @@ use rust_mqtt::{
     },
     utils::rng_generator::CountingRng,
 };
+use serde::{Deserialize, Serialize};
 
-use crate::Protocol;
+use crate::{Command, Protocol};
 
 const TCP_BUF_SIZE: usize = 512;
 const TCP_QUEUE_SIZE: usize = 3;
 const MQTT_MAX_PROPERTIES: usize = 5;
-const UDP_BUF_SIZE: usize = 1024;
+const UDP_BUF_SIZE: usize = 512;
 
 pub struct MqttUdp {
     socket: UdpSocket<'static>,
@@ -42,6 +48,7 @@ impl MqttUdp {
         // Start MQTT
         let mut mqtt = Self::connect_mqtt(stack, remote).await;
         mqtt.connect_to_broker().await.unwrap();
+        mqtt.subscribe_to_topic("ai/chatbot").await.unwrap();
 
         // Start UDP
         let (rx, tx, rx_meta, tx_meta) = (
@@ -77,6 +84,7 @@ impl MqttUdp {
                 TcpClientState::<TCP_QUEUE_SIZE, TCP_BUF_SIZE, TCP_BUF_SIZE>,
                 TcpClientState::new()
             );
+            debug!("tcp connection to MQTT broker at {}", remote);
             let connection = mk_static!(
                 TcpClient<TCP_QUEUE_SIZE, TCP_BUF_SIZE, TCP_BUF_SIZE>,
                 TcpClient::new(stack, state))
@@ -103,17 +111,27 @@ impl MqttUdp {
     }
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+struct Msg {
+    command: Command,
+}
+
 impl Protocol for MqttUdp {
     type Error = ();
 
     async fn recv_cmd(&self) -> Result<crate::Command, Self::Error> {
-        // match self.mqtt.borrow_mut().receive_message().await {
-        //     Ok((topic, payload)) => todo!(),
-        //     Err(e) => {
-        //         error!("mqtt: {e:?}");
-        //     }
-        // }
-        future::pending().await
+        loop {
+            match self.mqtt.borrow_mut().receive_message().await {
+                Ok((_, payload)) => {
+                    let (msg, _) = serde_json_core::from_slice::<Msg>(payload).unwrap();
+                    debug!("mqtt: received msg {:?}", msg);
+                    break Ok(msg.command);
+                }
+                Err(e) => {
+                    error!("mqtt: {e:?}");
+                }
+            }
+        }
     }
 
     async fn send_bin(&self, data: &[u8]) -> Result<(), Self::Error> {

@@ -76,6 +76,6 @@ async fn main(s: Spawner) {
     };
 
     let mut robot = Robot::new(proto, codec);
-    robot.debug_set_state(RobotState::Listening);
+    robot.set_state(RobotState::Listening).await;
     robot.main_loop().await;
 }

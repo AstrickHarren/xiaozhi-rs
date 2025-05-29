@@ -26,7 +26,7 @@ async fn main(s: Spawner) {
     let timg1 = TimerGroup::new(peripherals.TIMG1);
     esp_hal_embassy::init(timg1.timer0);
     esp_alloc::heap_allocator!(size: 150 * 1024);
-    esp_println::logger::init_logger(LevelFilter::Debug);
+    esp_println::logger::init_logger_from_env();
 
     let proto = {
         info!("Connecting to Wifi");

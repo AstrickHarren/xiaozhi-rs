@@ -79,35 +79,31 @@ impl MqttUdp {
         MQTT_MAX_PROPERTIES,
         CountingRng,
     > {
-        {
-            let state = &*mk_static!(
-                TcpClientState::<TCP_QUEUE_SIZE, TCP_BUF_SIZE, TCP_BUF_SIZE>,
-                TcpClientState::new()
-            );
-            debug!("tcp connection to MQTT broker at {}", remote);
-            let connection = mk_static!(
+        let state = &*mk_static!(
+            TcpClientState::<TCP_QUEUE_SIZE, TCP_BUF_SIZE, TCP_BUF_SIZE>,
+            TcpClientState::new()
+        );
+        debug!("tcp connection to MQTT broker at {}", remote);
+        let connection = mk_static!(
                 TcpClient<TCP_QUEUE_SIZE, TCP_BUF_SIZE, TCP_BUF_SIZE>,
                 TcpClient::new(stack, state))
-            .connect(SocketAddr::new(remote.addr.into(), 1883))
-            .await
-            .unwrap();
-            let mut mqtt_client_config = ClientConfig::<MQTT_MAX_PROPERTIES, _>::new(
-                MqttVersion::MQTTv5,
-                CountingRng(12345),
-            );
-            mqtt_client_config.add_client_id("oidfsduidiodsuio");
-            mqtt_client_config.add_username("alice");
-            mqtt_client_config.add_password("123");
+        .connect(SocketAddr::new(remote.addr.into(), 1883))
+        .await
+        .unwrap();
+        let mut mqtt_client_config =
+            ClientConfig::<MQTT_MAX_PROPERTIES, _>::new(MqttVersion::MQTTv5, CountingRng(12345));
+        mqtt_client_config.add_client_id("oidfsduidiodsuio");
+        mqtt_client_config.add_username("alice");
+        mqtt_client_config.add_password("123");
 
-            MqttClient::new(
-                connection,
-                mk_buf![u8, 0; TCP_BUF_SIZE],
-                TCP_BUF_SIZE,
-                mk_buf![u8, 0; TCP_BUF_SIZE],
-                TCP_BUF_SIZE,
-                mqtt_client_config,
-            )
-        }
+        MqttClient::new(
+            connection,
+            mk_buf![u8, 0; TCP_BUF_SIZE],
+            TCP_BUF_SIZE,
+            mk_buf![u8, 0; TCP_BUF_SIZE],
+            TCP_BUF_SIZE,
+            mqtt_client_config,
+        )
     }
 }
 

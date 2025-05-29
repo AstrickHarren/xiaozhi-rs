@@ -17,16 +17,6 @@ async def send():
     await sendAudio(conn, datas)
 
 
-def verify():
-    datas, _ = util.audio_to_data("./assets/wificonfig.p3")
-    dec = opuslib_next.Decoder(16000, 1)
-    for data in datas:
-        pcm = dec.decode(data, 960)
-        print("[ ", end="")
-        for i in np.frombuffer(pcm, dtype=np.int16):
-            print(i, end=" ")
-        print("]")
-
 async def receive():
     udp = await create_udp(local_addr=("172.20.10.8", 8080))
     dec = opuslib_next.Decoder(16000, 1)
@@ -44,7 +34,5 @@ async def receive():
         data = dec.decode(data, 960)
         stream.write(np.frombuffer(data, dtype=np.int16))
 
-# verify()
 asyncio.run(receive())
-# print("sleeping")
 time.sleep(1000)

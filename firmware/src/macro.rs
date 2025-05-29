@@ -26,4 +26,14 @@ macro_rules! mk_ch {
         let receiver = ch.receiver();
         (sender, receiver)
     }};
+
+    ($val:literal; $ty: ty) => {{
+        let ch = &*$crate::mk_static! {
+            embassy_sync::channel::Channel::<NoopRawMutex, $ty, $val>,
+            embassy_sync::channel::Channel::new()
+        };
+        let sender = ch.sender();
+        let receiver = ch.receiver();
+        (sender, receiver)
+    }};
 }

@@ -9,6 +9,7 @@ use core::{
 
 use bytes::{BufMut, BytesMut};
 use embassy_executor::Spawner;
+use embassy_futures::select::select;
 use embassy_net::{
     tcp::client::{TcpClient, TcpClientState, TcpConnection},
     udp::{PacketMetadata, UdpSocket},
@@ -152,18 +153,19 @@ async fn task(
     );
     let rx = mk_buf![u8, 0; TCP_BUF_SIZE];
     let tx = mk_buf![u8, 0; TCP_BUF_SIZE];
+    const KEEP_ALIVE: u16 = 60;
     let config = || {
         let mut c =
             ClientConfig::<MQTT_MAX_PROPERTIES, _>::new(MqttVersion::MQTTv5, CountingRng(12345));
         c.add_client_id("oidfsduidiodsuio");
         c.add_username("alice");
         c.add_password("123");
-        c.keep_alive = 10;
+        c.keep_alive = KEEP_ALIVE;
         c
     };
 
     loop {
-        debug!("mqtt connecting to {}", remote);
+        debug!("tcp connecting to {}", remote);
         let connection = tcp
             .connect(SocketAddr::new(remote.addr.into(), 1883))
             .await
@@ -181,16 +183,32 @@ async fn task(
                     TCP_BUF_SIZE,
                     config(),
                 );
-                debug!("mqtt connected to {}", remote);
+                debug!("mqtt connecting to {}", remote);
                 mqtt.connect_to_broker().await.unwrap();
                 mqtt.subscribe_to_topic("ai/chatbot").await.unwrap();
                 Some(mqtt)
             }
         }
         info!("mqtt connected to {}", remote);
-
         connected.send(()).await;
-        reconnect.receive().await
+
+        use embassy_futures::select::Either::*;
+        while let First(_) = select(
+            Timer::after_secs((KEEP_ALIVE / 2) as u64),
+            reconnect.receive(),
+        )
+        .await
+        {
+            debug!("mqtt send ping");
+            mqtt.lock()
+                .await
+                .as_mut()
+                .unwrap()
+                .send_ping()
+                .await
+                .inspect_err(|e| error!("mqtt ping: {e:?}"))
+                .ok();
+        }
     }
 }
 
@@ -213,9 +231,8 @@ impl Protocol for MqttUdp {
                 }
                 Err(e) => {
                     drop(mqtt);
-                    // warn!("Mqtt disconnected because {e:?}, reconnecting");
+                    warn!("Mqtt disconnected because {e:?}, reconnecting");
                     self.reconnect().await;
-                    println!("reconnect returned");
                 }
             }
         }
@@ -236,15 +253,3 @@ impl Protocol for MqttUdp {
         Ok(buf)
     }
 }
-
-pub struct Mqtt {
-    tcp: RefCell<TcpClient<'static, TCP_QUEUE_SIZE, TCP_BUF_SIZE, TCP_BUF_SIZE>>,
-    mqtt: MqttClient<
-        'static,
-        TcpConnection<'static, TCP_QUEUE_SIZE, TCP_BUF_SIZE, TCP_BUF_SIZE>,
-        MQTT_MAX_PROPERTIES,
-        CountingRng,
-    >,
-}
-
-impl Mqtt {}

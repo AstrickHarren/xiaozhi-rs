@@ -58,6 +58,7 @@ pub struct MqttUdp {
     >,
     mqtt_connected: Receiver<'static, NoopRawMutex, (), 1>,
     mqtt_reconnect: Sender<'static, NoopRawMutex, (), 1>,
+    mqtt_need_ping: Receiver<'static, NoopRawMutex, (), 1>,
     remote: IpEndpoint,
 }
 
@@ -77,6 +78,7 @@ impl MqttUdp {
 
         let (reconnect_tx, reconnect_rx) = mk_ch!(1; ());
         let (connected_tx, connected_rx) = mk_ch!(1; ());
+        let (needping_tx, needping_rx) = mk_ch!(1; ());
         let this = Self {
             stack,
             socket: udp,
@@ -93,9 +95,11 @@ impl MqttUdp {
             >, Mutex::new(None)),
             mqtt_reconnect: reconnect_tx,
             mqtt_connected: connected_rx,
+            mqtt_need_ping: needping_rx,
             remote,
         };
-        this.connect_mqtt(spawner, connected_tx, reconnect_rx).await;
+        this.connect_mqtt(spawner, connected_tx, reconnect_rx, needping_tx)
+            .await;
         this
     }
 
@@ -111,11 +115,13 @@ impl MqttUdp {
         spawner: Spawner,
         connected: Sender<'static, NoopRawMutex, (), 1>,
         reconnect: Receiver<'static, NoopRawMutex, (), 1>,
+        needping: Sender<'static, NoopRawMutex, (), 1>,
     ) {
         spawner
             .spawn(task(
                 connected,
                 reconnect,
+                needping,
                 self.mqtt,
                 self.stack,
                 self.remote,
@@ -129,6 +135,7 @@ impl MqttUdp {
 async fn task(
     connected: Sender<'static, NoopRawMutex, (), 1>,
     reconnect: Receiver<'static, NoopRawMutex, (), 1>,
+    needping: Sender<'static, NoopRawMutex, (), 1>,
     mqtt: &'static Mutex<
         NoopRawMutex,
         Option<
@@ -193,21 +200,14 @@ async fn task(
         connected.send(()).await;
 
         use embassy_futures::select::Either::*;
+
         while let First(_) = select(
             Timer::after_secs((KEEP_ALIVE / 2) as u64),
             reconnect.receive(),
         )
         .await
         {
-            debug!("mqtt send ping");
-            mqtt.lock()
-                .await
-                .as_mut()
-                .unwrap()
-                .send_ping()
-                .await
-                .inspect_err(|e| error!("mqtt ping: {e:?}"))
-                .ok();
+            needping.send(()).await
         }
     }
 }
@@ -221,18 +221,28 @@ impl Protocol for MqttUdp {
     type Error = ();
 
     async fn recv_cmd(&self) -> Result<crate::Command, Self::Error> {
+        use embassy_futures::select::Either::*;
         loop {
             let mut mqtt = self.mqtt.lock().await;
-            match mqtt.as_mut().unwrap().receive_message().await {
-                Ok((_, payload)) => {
+            match select(
+                mqtt.as_mut().unwrap().receive_message(),
+                self.mqtt_need_ping.receive(),
+            )
+            .await
+            {
+                First(Ok((_, payload))) => {
                     let (msg, _) = serde_json_core::from_slice::<Msg>(payload).unwrap();
                     debug!("mqtt: received msg {:?}", msg);
                     break Ok(msg.command);
                 }
-                Err(e) => {
+                First(Err(e)) => {
                     drop(mqtt);
                     warn!("Mqtt disconnected because {e:?}, reconnecting");
                     self.reconnect().await;
+                }
+                Second(_) => {
+                    debug!("Mqtt send ping");
+                    mqtt.as_mut().unwrap().send_ping().await.unwrap();
                 }
             }
         }

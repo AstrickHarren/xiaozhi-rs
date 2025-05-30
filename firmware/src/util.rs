@@ -29,3 +29,16 @@ impl BytesMutExtend for BytesMut {
         }
     }
 }
+
+pub trait SliceExt {
+    type Item;
+    unsafe fn force_mut(&self) -> &mut [Self::Item];
+}
+
+impl<T> SliceExt for [T] {
+    type Item = T;
+
+    unsafe fn force_mut(&self) -> &mut [Self::Item] {
+        slice::from_raw_parts_mut(self.as_ptr() as *mut T, self.len())
+    }
+}

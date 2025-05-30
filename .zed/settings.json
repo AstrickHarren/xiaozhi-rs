@@ -4,6 +4,9 @@
       // "binary": {
       //   "path": "/Users/astrick/.cargo/bin/rust-analyzer"
       // },
+      "diagnostics": {
+        "fetch_cargo_diagnostics": false
+      },
       "initialization_options": {
         "cargo": {
           "allTargets": false,

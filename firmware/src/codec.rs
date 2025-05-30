@@ -9,7 +9,6 @@ use esp_hal::{
     i2s::master::{I2sRx, I2sTx},
     Async,
 };
-use esp_println::dbg;
 use log::{error, info, trace, warn};
 use opus::{Decoder, Encoder};
 
@@ -124,8 +123,7 @@ async fn speak_task(
             .map(|p| {
                 let temp = *p as i64 * volume_factor as i64;
                 // clamp to i32 range
-                let clamped = temp.max(i32::MIN as i64).min(i32::MAX as i64) as i32;
-                clamped as i32
+                temp.clamp(i32::MIN as i64, i32::MAX as i64) as i32
             })
             .flat_map(|x| [0, x])
             .flat_map(|x| x.to_le_bytes())

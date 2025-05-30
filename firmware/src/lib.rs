@@ -1,6 +1,7 @@
 #![feature(inherent_str_constructors)]
 #![feature(impl_trait_in_assoc_type)]
 #![feature(array_chunks)]
+#![feature(type_alias_impl_trait)]
 #![no_std]
 
 use core::{fmt::Debug, future::Future};

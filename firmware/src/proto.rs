@@ -1,11 +1,4 @@
-use core::{
-    cell::RefCell,
-    future::{self, pending},
-    net::SocketAddr,
-    ops::Deref,
-    ptr::slice_from_raw_parts_mut,
-    slice,
-};
+use core::net::SocketAddr;
 
 use bytes::{BufMut, BytesMut};
 use embassy_executor::Spawner;
@@ -18,23 +11,17 @@ use embassy_net::{
 use embassy_sync::{
     blocking_mutex::raw::NoopRawMutex,
     channel::{Receiver, Sender},
-    mutex::Mutex,
 };
 use embassy_time::Timer;
 use embedded_nal_async::TcpConnect;
-use esp_println::{dbg, println};
 use log::{debug, error, info, warn};
 use rust_mqtt::{
-    client::{
-        client::MqttClient,
-        client_config::{ClientConfig, MqttVersion},
-    },
-    packet::v5::reason_codes::ReasonCode,
+    client::client_config::{ClientConfig, MqttVersion},
     utils::rng_generator::CountingRng,
 };
 use serde::{Deserialize, Serialize};
-use static_cell::make_static;
 
+use crate::util::{BytesMutExtend, SliceExt};
 use crate::{Command, Protocol};
 
 const TCP_BUF_SIZE: usize = 512;
@@ -42,20 +29,18 @@ const TCP_QUEUE_SIZE: usize = 3;
 const MQTT_MAX_PROPERTIES: usize = 5;
 const UDP_BUF_SIZE: usize = 512;
 
+type Mutex<T> = embassy_sync::mutex::Mutex<NoopRawMutex, T>;
+type MqttClient = rust_mqtt::client::client::MqttClient<
+    'static,
+    TcpConnection<'static, TCP_QUEUE_SIZE, TCP_BUF_SIZE, TCP_BUF_SIZE>,
+    MQTT_MAX_PROPERTIES,
+    CountingRng,
+>;
+
 pub struct MqttUdp {
     stack: Stack<'static>,
     socket: UdpSocket<'static>,
-    mqtt: &'static Mutex<
-        NoopRawMutex,
-        Option<
-            MqttClient<
-                'static,
-                TcpConnection<'static, TCP_QUEUE_SIZE, TCP_BUF_SIZE, TCP_BUF_SIZE>,
-                MQTT_MAX_PROPERTIES,
-                CountingRng,
-            >,
-        >,
-    >,
+    mqtt: &'static Mutex<Option<MqttClient>>,
     mqtt_connected: Receiver<'static, NoopRawMutex, (), 1>,
     mqtt_reconnect: Sender<'static, NoopRawMutex, (), 1>,
     mqtt_need_ping: Receiver<'static, NoopRawMutex, (), 1>,
@@ -82,17 +67,7 @@ impl MqttUdp {
         let this = Self {
             stack,
             socket: udp,
-            mqtt: mk_static!(Mutex<
-                NoopRawMutex,
-                Option<
-                    MqttClient<
-                        'static,
-                        TcpConnection<'static, TCP_QUEUE_SIZE, TCP_BUF_SIZE, TCP_BUF_SIZE>,
-                        MQTT_MAX_PROPERTIES,
-                        CountingRng,
-                    >,
-                >,
-            >, Mutex::new(None)),
+            mqtt: mk_static!(Mutex<Option<MqttClient>>, Mutex::new(None)),
             mqtt_reconnect: reconnect_tx,
             mqtt_connected: connected_rx,
             mqtt_need_ping: needping_rx,
@@ -136,17 +111,7 @@ async fn task(
     connected: Sender<'static, NoopRawMutex, (), 1>,
     reconnect: Receiver<'static, NoopRawMutex, (), 1>,
     needping: Sender<'static, NoopRawMutex, (), 1>,
-    mqtt: &'static Mutex<
-        NoopRawMutex,
-        Option<
-            MqttClient<
-                'static,
-                TcpConnection<'static, TCP_QUEUE_SIZE, TCP_BUF_SIZE, TCP_BUF_SIZE>,
-                MQTT_MAX_PROPERTIES,
-                CountingRng,
-            >,
-        >,
-    >,
+    mqtt: &'static Mutex<Option<MqttClient>>,
     stack: Stack<'static>,
     remote: IpEndpoint,
 ) {
@@ -184,9 +149,9 @@ async fn task(
             *mqtt = {
                 let mut mqtt = MqttClient::new(
                     connection,
-                    unsafe { slice::from_raw_parts_mut(rx.as_ptr() as *mut u8, rx.len()) },
+                    unsafe { rx.force_mut() },
                     TCP_BUF_SIZE,
-                    unsafe { slice::from_raw_parts_mut(tx.as_ptr() as *mut u8, tx.len()) },
+                    unsafe { tx.force_mut() },
                     TCP_BUF_SIZE,
                     config(),
                 );
@@ -254,11 +219,7 @@ impl Protocol for MqttUdp {
 
     async fn recv_bin(&self) -> Result<bytes::BytesMut, Self::Error> {
         let mut buf = BytesMut::with_capacity(1024);
-        let (n, _) = self
-            .socket
-            .recv_from(unsafe { slice::from_raw_parts_mut(buf.as_mut_ptr(), 1024) })
-            .await
-            .unwrap();
+        let (n, _) = self.socket.recv_from(buf.transmute_cap()).await.unwrap();
         unsafe { buf.advance_mut(n) };
         Ok(buf)
     }

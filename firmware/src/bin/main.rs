@@ -4,7 +4,6 @@
 #![feature(array_chunks)]
 
 use embassy_executor::Spawner;
-use embassy_time::{Duration, Timer};
 use esp_backtrace as _;
 use esp_hal::clock::CpuClock;
 use esp_hal::timer::timg::TimerGroup;
@@ -16,8 +15,6 @@ use firmware::wifi::{WifiConfig, WifiConnection};
 use firmware::Robot;
 use firmware::RobotState;
 use log::info;
-use log::warn;
-use log::LevelFilter;
 
 #[esp_hal_embassy::main]
 async fn main(s: Spawner) {
@@ -76,6 +73,6 @@ async fn main(s: Spawner) {
     };
 
     let mut robot = Robot::new(proto, codec);
-    robot.set_state(RobotState::Listening).await;
+    robot.set_state(RobotState::Idle).await;
     robot.main_loop().await;
 }

@@ -1,7 +1,7 @@
 [wokwi]
 version = 1
-firmware = 'target/xtensa-esp32s3-none-elf/release/firmware'
-elf = 'target/xtensa-esp32s3-none-elf/release/firmware'
+firmware = 'target/xtensa-esp32s3-none-elf/debug/firmware'
+elf = 'target/xtensa-esp32s3-none-elf/debug/firmware'
 gdbServerPort = 3333
 
 [net]

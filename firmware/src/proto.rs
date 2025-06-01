@@ -1,3 +1,5 @@
+pub mod websocket;
+
 use core::net::SocketAddr;
 
 use bytes::{BufMut, BytesMut};
@@ -21,7 +23,10 @@ use rust_mqtt::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::util::{BytesMutExtend, SliceExt};
+use crate::{
+    util::{BytesMutExtend, SliceExt},
+    Msg,
+};
 use crate::{Command, Protocol};
 
 const TCP_BUF_SIZE: usize = 512;
@@ -178,14 +183,12 @@ async fn task(
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-struct Msg {
+struct MqttMsg {
     command: Command,
 }
 
-impl Protocol for MqttUdp {
-    type Error = ();
-
-    async fn recv_cmd(&self) -> Result<crate::Command, Self::Error> {
+impl MqttUdp {
+    async fn recv_cmd(&self) -> Result<crate::Command, ()> {
         use embassy_futures::select::Either::*;
         loop {
             let mut mqtt = self.mqtt.lock().await;
@@ -196,7 +199,7 @@ impl Protocol for MqttUdp {
             .await
             {
                 First(Ok((_, payload))) => {
-                    let (msg, _) = serde_json_core::from_slice::<Msg>(payload).unwrap();
+                    let (msg, _) = serde_json_core::from_slice::<MqttMsg>(payload).unwrap();
                     debug!("mqtt: received msg {:?}", msg);
                     break Ok(msg.command);
                 }
@@ -213,14 +216,27 @@ impl Protocol for MqttUdp {
         }
     }
 
-    async fn send_bin(&self, data: &[u8]) -> Result<(), Self::Error> {
-        Ok(self.socket.send_to(data, self.remote).await.unwrap())
-    }
-
-    async fn recv_bin(&self) -> Result<bytes::BytesMut, Self::Error> {
+    async fn recv_bin(&self) -> Result<bytes::BytesMut, ()> {
         let mut buf = BytesMut::with_capacity(1024);
         let (n, _) = self.socket.recv_from(buf.transmute_cap()).await.unwrap();
         unsafe { buf.advance_mut(n) };
         Ok(buf)
+    }
+}
+
+impl Protocol for MqttUdp {
+    type Error = ();
+
+    async fn recv(&self) -> Result<crate::Msg, Self::Error> {
+        use embassy_futures::select::Either::*;
+        let msg = match select(self.recv_bin(), self.recv_cmd()).await {
+            First(bin) => Msg::Audio(bin?),
+            Second(cmd) => Msg::Cmd(cmd?),
+        };
+        Ok(msg)
+    }
+
+    async fn send_bin(&self, data: &[u8]) -> Result<(), Self::Error> {
+        Ok(self.socket.send_to(data, self.remote).await.unwrap())
     }
 }

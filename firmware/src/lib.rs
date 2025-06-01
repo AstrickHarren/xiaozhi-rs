@@ -34,12 +34,16 @@ pub enum Command {
     Listen,
 }
 
+pub enum Msg {
+    Cmd(Command),
+    Audio(BytesMut),
+}
+
 pub trait Protocol {
     type Error;
 
-    fn recv_cmd(&self) -> impl Future<Output = Result<Command, Self::Error>>;
+    fn recv(&self) -> impl Future<Output = Result<Msg, Self::Error>>;
     fn send_bin(&self, data: &[u8]) -> impl Future<Output = Result<(), Self::Error>>;
-    fn recv_bin(&self) -> impl Future<Output = Result<BytesMut, Self::Error>>;
 }
 
 pub trait Audio {
@@ -87,24 +91,24 @@ where
     }
 
     async fn idle(&mut self) -> Result<(), P::Error> {
-        match self.proto.recv_cmd().await? {
-            Command::Stop => self.set_state(RobotState::Idle).await,
-            Command::Speak => self.set_state(RobotState::Speaking).await,
-            Command::Listen => self.set_state(RobotState::Listening).await,
+        match self.proto.recv().await? {
+            Msg::Cmd(Command::Stop) => self.set_state(RobotState::Idle).await,
+            Msg::Cmd(Command::Speak) => self.set_state(RobotState::Speaking).await,
+            Msg::Cmd(Command::Listen) => self.set_state(RobotState::Listening).await,
+            Msg::Audio(_) => (),
         };
         Ok(())
     }
 
     async fn speaking(&mut self) -> Result<(), P::Error> {
-        use embassy_futures::select::Either::*;
-        match select(self.proto.recv_cmd(), self.proto.recv_bin()).await {
-            First(cmd) => match cmd? {
+        match self.proto.recv().await? {
+            Msg::Cmd(cmd) => match cmd {
                 // TODO: reset codec here
                 Command::Stop => self.set_state(RobotState::Idle).await,
                 Command::Speak => self.set_state(RobotState::Speaking).await,
                 Command::Listen => self.set_state(RobotState::Listening).await,
             },
-            Second(bin) => self.codec.play(&bin?).await.unwrap(),
+            Msg::Audio(bin) => self.codec.play(&bin).await.unwrap(),
         };
 
         Ok(())
@@ -112,11 +116,12 @@ where
 
     async fn listening(&mut self) -> Result<(), P::Error> {
         use embassy_futures::select::Either::*;
-        match select(self.proto.recv_cmd(), self.codec.record()).await {
+        match select(self.proto.recv(), self.codec.record()).await {
             First(cmd) => match cmd? {
-                Command::Stop => self.set_state(RobotState::Idle).await,
-                Command::Speak => self.set_state(RobotState::Speaking).await,
-                Command::Listen => self.set_state(RobotState::Listening).await,
+                Msg::Cmd(Command::Stop) => self.set_state(RobotState::Idle).await,
+                Msg::Cmd(Command::Speak) => self.set_state(RobotState::Speaking).await,
+                Msg::Cmd(Command::Listen) => self.set_state(RobotState::Listening).await,
+                Msg::Audio(_) => (),
             },
             Second(bin) => self.proto.send_bin(&bin.unwrap()).await.unwrap(),
         }

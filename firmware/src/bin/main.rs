@@ -26,7 +26,6 @@ use embedded_tls::TlsError;
 use embedded_tls::{TlsConfig, TlsConnection, TlsContext};
 use embedded_websocket::framer::FramerError;
 use embedded_websocket::EmptyRng;
-use embedded_websocket::WebSocketClient;
 use esp_backtrace as _;
 use esp_hal::clock::CpuClock;
 use esp_hal::peripheral::Peripheral;
@@ -40,6 +39,9 @@ use firmware::codec::I2sSimplex;
 use firmware::codec::I2sSimplexConfig;
 use firmware::mk_buf;
 use firmware::mk_static;
+use firmware::net::Connect;
+use firmware::net::TlsClient;
+use firmware::net::WebSocketClient;
 use firmware::proto::websocket::WebSocket;
 use firmware::proto::MqttUdp;
 use firmware::wifi::{WifiConfig, WifiConnection};
@@ -50,6 +52,7 @@ use log::debug;
 use log::info;
 use nourl::Url;
 use reqwless::client::HttpClient;
+use reqwless::client::HttpConnection;
 use reqwless::client::TlsVerify;
 use reqwless::request::Method;
 use reqwless::request::RequestBuilder;
@@ -92,34 +95,24 @@ async fn main(s: Spawner) {
 
     info!("Connecting to WebSocket");
     let state = TcpClientState::new();
-    let tcp = TcpClient::<TCP_QUEUE_SIZE, TCP_BUF_SIZE, TCP_BUF_SIZE>::new(stack, &state);
+    let tcp = TcpClient::<1, TCP_BUF_SIZE, TCP_BUF_SIZE>::new(stack, &state);
     let dns = DnsSocket::new(stack);
-    const URL: &str = "https://echo.websocket.org";
-    let url: Url = Url::parse(URL).unwrap();
-    let ip = dns.query(url.host(), DnsQueryType::A).await.unwrap()[0];
-    let tcp_conn = tcp.connect(SocketAddr::new(ip.into(), 443)).await.unwrap();
-    debug!("tcp connection complete");
-    let mut tls_conn =
-        TlsConnection::new(tcp_conn, mk_buf![u8, 0; 1024 * 10], mk_buf![u8, 0; 1024]);
-    let config = TlsConfig::<Aes128GcmSha256>::new().with_server_name(url.host());
-    tls_conn
-        .open::<_, embedded_tls::NoVerify>(TlsContext::new(
-            &config,
-            &mut Trng::new(peripherals.RNG, peripherals.ADC1),
-        ))
+    let tls = TlsClient::new(
+        tcp,
+        dns,
+        Trng::new(peripherals.RNG, peripherals.ADC1),
+        mk_buf!(4096),
+        mk_buf!(1024),
+    );
+    let mut ws = WebSocketClient::new(tls, EmptyRng::new(), mk_buf!(2048), mk_buf!(1024));
+    let mut conn = ws
+        .connect("https://echo.websocket.org", None)
         .await
-        .expect("error establishing TLS connection");
-    debug!("tls connection complete");
-    let mut ws = WebSocketClient::new_client(EmptyRng::new());
-    let mut ws = WebSocket::new(&mut ws, tls_conn).await;
-    let opt = embedded_websocket::WebSocketOptions {
-        path: "/",
-        host: url.host(),
-        origin: URL,
-        sub_protocols: None,
-        additional_headers: None,
-    };
-    ws.connect(opt).await.unwrap();
+        .unwrap();
+    println!("websocket connected");
+    conn.send_text("hello, world").await.unwrap();
+    dbg!(conn.recv().await.unwrap());
+    dbg!(conn.recv().await.unwrap());
 
     let codec = {
         let (speaker_buf, speaker_tx) = I2sConfig {
@@ -147,47 +140,7 @@ async fn main(s: Spawner) {
         )
     };
 
-    let mut robot = Robot::new(ws, codec);
+    let mut robot = Robot::new(conn, codec);
     robot.set_state(RobotState::Idle).await;
     robot.main_loop().await;
-}
-
-struct TlsClient<'a> {
-    tcp: &'a mut TcpClient<'a, TCP_QUEUE_SIZE, TCP_BUF_SIZE, TCP_BUF_SIZE>,
-    rng: RefCell<Trng<'a>>,
-}
-
-impl<'b> TcpConnect for TlsClient<'b> {
-    type Error = TlsError;
-
-    type Connection<'a>
-        = TlsConnection<
-        'a,
-        TcpConnection<'a, TCP_QUEUE_SIZE, TCP_BUF_SIZE, TCP_BUF_SIZE>,
-        Aes128GcmSha256,
-    >
-    where
-        Self: 'a;
-
-    async fn connect<'a>(
-        &'a self,
-        remote: SocketAddr,
-    ) -> Result<Self::Connection<'a>, Self::Error> {
-        let rx = mk_buf![u8, 0; TCP_BUF_SIZE];
-        let tx = mk_buf![u8, 0; 512];
-        const KEEP_ALIVE: u16 = 60;
-
-        const URL: &'static str = "https://google.com";
-        println!("connecting to {URL}");
-        let tcp_conn = self.tcp.connect(remote).await.unwrap();
-        let mut tls = TlsConnection::new(tcp_conn, rx, tx);
-        let config = TlsConfig::<Aes128GcmSha256>::new().with_server_name("localhost");
-        tls.open::<_, embedded_tls::NoVerify>(TlsContext::new(
-            &config,
-            self.rng.borrow_mut().deref_mut(),
-        ))
-        .await
-        .expect("error establishing TLS connection");
-        Ok(tls)
-    }
 }

@@ -15,6 +15,7 @@ pub mod audio;
 pub mod codec;
 #[macro_use]
 mod r#macro;
+pub mod net;
 pub mod p3;
 pub mod proto;
 pub mod util;

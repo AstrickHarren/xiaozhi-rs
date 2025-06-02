@@ -10,6 +10,9 @@ macro_rules! mk_static {
 
 #[macro_export]
 macro_rules! mk_buf {
+    [$size: expr] => {
+        $crate::mk_static!([u8; $size], [0; $size])
+    };
     [ $ty:ty , $filler:expr  ;$size:expr ] => {
         $crate::mk_static!([$ty; $size], [$filler; $size])
     };

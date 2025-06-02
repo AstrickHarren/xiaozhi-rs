@@ -34,8 +34,8 @@ async def receive():
         data = dec.decode(data, 960)
         stream.write(np.frombuffer(data, dtype=np.int16))
 
-# asyncio.run(receive())
-# time.sleep(1000)
+asyncio.run(receive())
+time.sleep(1000)
 
 import http.server
 import ssl
@@ -72,4 +72,4 @@ def run_https_server(bind_addr='0.0.0.0', port=443, certfile='cert.pem', keyfile
         httpd.server_close()
         sys.exit(0)
 
-run_https_server()
+# run_https_server()

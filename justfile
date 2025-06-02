@@ -67,3 +67,8 @@ build *ARGS:
       ARGS="$i $ARGS";
     done
     cd firmware && ESPFLASH_PORT=/dev/cu.usbmodem1101 ESP_LOG=$ESP_LOG cargo +esp b $ARGS;
+
+clean *ARGS:
+    #! /bin/sh
+    . ~/export-esp.sh
+    cd firmware && cargo +esp clean --target xtensa-esp32s3-none-elf {{ARGS}};

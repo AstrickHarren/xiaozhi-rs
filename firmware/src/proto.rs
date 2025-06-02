@@ -227,16 +227,16 @@ impl MqttUdp {
 impl Protocol for MqttUdp {
     type Error = ();
 
-    async fn recv(&self) -> Result<crate::Msg, Self::Error> {
+    async fn recv(&mut self) -> Result<crate::Msg, Self::Error> {
         use embassy_futures::select::Either::*;
         let msg = match select(self.recv_bin(), self.recv_cmd()).await {
-            First(bin) => Msg::Audio(bin?),
+            First(bin) => Msg::Audio(bin?.freeze()),
             Second(cmd) => Msg::Cmd(cmd?),
         };
         Ok(msg)
     }
 
-    async fn send_bin(&self, data: &[u8]) -> Result<(), Self::Error> {
+    async fn send_bin(&mut self, data: &[u8]) -> Result<(), Self::Error> {
         Ok(self.socket.send_to(data, self.remote).await.unwrap())
     }
 }

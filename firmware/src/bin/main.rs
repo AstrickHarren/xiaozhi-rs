@@ -3,6 +3,7 @@
 #![feature(impl_trait_in_assoc_type)]
 #![feature(array_chunks)]
 #![feature(inherent_str_constructors)]
+#![feature(concat_bytes)]
 
 use core::cell::RefCell;
 use core::net::SocketAddr;
@@ -23,6 +24,9 @@ use embedded_tls::Aes128GcmSha256;
 use embedded_tls::NoVerify;
 use embedded_tls::TlsError;
 use embedded_tls::{TlsConfig, TlsConnection, TlsContext};
+use embedded_websocket::framer::FramerError;
+use embedded_websocket::EmptyRng;
+use embedded_websocket::WebSocketClient;
 use esp_backtrace as _;
 use esp_hal::clock::CpuClock;
 use esp_hal::peripheral::Peripheral;
@@ -36,12 +40,15 @@ use firmware::codec::I2sSimplex;
 use firmware::codec::I2sSimplexConfig;
 use firmware::mk_buf;
 use firmware::mk_static;
+use firmware::proto::websocket::WebSocket;
 use firmware::proto::MqttUdp;
 use firmware::wifi::{WifiConfig, WifiConnection};
+use firmware::Protocol;
 use firmware::Robot;
 use firmware::RobotState;
 use log::debug;
 use log::info;
+use nourl::Url;
 use reqwless::client::HttpClient;
 use reqwless::client::TlsVerify;
 use reqwless::request::Method;
@@ -78,10 +85,82 @@ async fn main(s: Spawner) {
         stack
     };
 
-    // let proto = {
+    // let mqtt = {
     //     info!("Connecting to Wifi");
     //     MqttUdp::build(s, stack, "172.20.10.8:8080".parse().unwrap()).await
     // };
+
+    info!("Connecting to WebSocket");
+    let state = TcpClientState::new();
+    let tcp = TcpClient::<TCP_QUEUE_SIZE, TCP_BUF_SIZE, TCP_BUF_SIZE>::new(stack, &state);
+    let dns = DnsSocket::new(stack);
+    const URL: &str = "https://echo.websocket.org";
+    let url: Url = Url::parse(URL).unwrap();
+    let ip = dns.query(url.host(), DnsQueryType::A).await.unwrap()[0];
+    println!("connecting to ip {}", ip);
+    let tcp_conn = tcp.connect(SocketAddr::new(ip.into(), 443)).await.unwrap();
+    println!("tcp connection complete");
+
+    // let mut http = HttpClient::new_with_tls(
+    //     &tcp,
+    //     &dns,
+    //     reqwless::client::TlsConfig::new(
+    //         0,
+    //         mk_buf![u8, 0; 7000],
+    //         mk_buf![u8, 0; 1024],
+    //         TlsVerify::None,
+    //     ),
+    // );
+    // let mut req = http
+    //     .request(Method::GET, "https://google.com")
+    //     .await
+    //     .unwrap();
+    // let mut resp = req
+    //     .send(mk_buf![u8, 0; 1024])
+    //     .await
+    //     .unwrap()
+    //     .body()
+    //     .reader();
+    // let body = &mut [0; 7000];
+    // let n = resp.read(body).await.unwrap();
+    // dbg!(str::from_utf8(&body[..n]));
+
+    let mut tls_conn =
+        TlsConnection::new(tcp_conn, mk_buf![u8, 0; 1024 * 10], mk_buf![u8, 0; 1024]);
+    let config = TlsConfig::<Aes128GcmSha256>::new().with_server_name(url.host());
+    tls_conn
+        .open::<_, embedded_tls::NoVerify>(TlsContext::new(
+            &config,
+            &mut Trng::new(peripherals.RNG, peripherals.ADC1),
+        ))
+        .await
+        .expect("error establishing TLS connection");
+    println!("tls connection complete");
+
+    // use embedded_tls::{TlsConfig, TlsContext};
+    // // use rand_chacha::ChaCha8Rng;
+    // // use rand_core::{RngCore, SeedableRng};
+    // let mut rng = ChaCha8Rng::seed_from_u64(tls.seed);
+    // // tls.seed = rng.next_u64();
+    // let mut config = TlsConfig::new().with_server_name(url.host());
+    // let mut conn: embedded_tls::TlsConnection =
+    //     embedded_tls::TlsConnection::new(conn, tls.read_buffer, tls.write_buffer);
+    // conn.open::<_, embedded_tls::NoVerify>(TlsContext::new(&config, &mut rng))
+    //     .await?;
+
+    let mut ws = WebSocketClient::new_client(EmptyRng::new());
+    let mut ws = WebSocket::new(&mut ws, tls_conn).await;
+    let opt = embedded_websocket::WebSocketOptions {
+        path: "/",
+        host: url.host(),
+        origin: URL,
+        sub_protocols: None,
+        additional_headers: None,
+    };
+    ws.connect(opt).await.unwrap();
+    println!("websocket connection complete");
+    ws.send_text("hello, world").await.unwrap();
+    dbg!(ws.recv().await.unwrap());
 
     // let codec = {
     //     let (speaker_buf, speaker_tx) = I2sConfig {
@@ -111,30 +190,30 @@ async fn main(s: Spawner) {
 
     // tls
 
-    let remote: IpEndpoint = "10.13.37.2:443".parse().unwrap();
-    let state = &*mk_static!(
-        TcpClientState::<TCP_QUEUE_SIZE, TCP_BUF_SIZE, TCP_BUF_SIZE>,
-        TcpClientState::new()
-    );
-    let tcp = mk_static!(
-        TcpClient::<TCP_QUEUE_SIZE, TCP_BUF_SIZE, TCP_BUF_SIZE>,
-        TcpClient::new(stack, state)
-    );
-    let rx = mk_buf![u8, 0; TCP_BUF_SIZE];
-    const KEEP_ALIVE: u16 = 60;
+    // let remote: IpEndpoint = "10.13.37.2:443".parse().unwrap();
+    // let state = &*mk_static!(
+    //     TcpClientState::<TCP_QUEUE_SIZE, TCP_BUF_SIZE, TCP_BUF_SIZE>,
+    //     TcpClientState::new()
+    // );
+    // let tcp = mk_static!(
+    //     TcpClient::<TCP_QUEUE_SIZE, TCP_BUF_SIZE, TCP_BUF_SIZE>,
+    //     TcpClient::new(stack, state)
+    // );
+    // let rx = mk_buf![u8, 0; TCP_BUF_SIZE];
+    // const KEEP_ALIVE: u16 = 60;
 
-    const URL: &'static str = "https://host.wokwi.internal";
-    let tls = TlsClient {
-        tcp,
-        rng: Trng::new(peripherals.RNG, peripherals.ADC1).into(),
-    };
-    let dns = DnsSocket::new(stack);
-    let mut http = HttpClient::new(&tls, &dns);
-    let mut req = http.request(Method::GET, URL).await.unwrap();
-    let mut resp = req.send(rx).await.unwrap().body().reader();
-    let body = &mut [0; 1024];
-    let n = resp.read(body).await.unwrap();
-    dbg!(str::from_utf8(&body[..n]));
+    // const URL: &'static str = "https://host.wokwi.internal";
+    // let tls = TlsClient {
+    //     tcp,
+    //     rng: Trng::new(peripherals.RNG, peripherals.ADC1).into(),
+    // };
+    // let dns = DnsSocket::new(stack);
+    // let mut http = HttpClient::new(&tls, &dns);
+    // let mut req = http.request(Method::GET, URL).await.unwrap();
+    // let mut resp = req.send(rx).await.unwrap().body().reader();
+    // let body = &mut [0; 1024];
+    // let n = resp.read(body).await.unwrap();
+    // dbg!(str::from_utf8(&body[..n]));
 
     // println!("connecting to {URL}");
     // let ip = dns
@@ -155,17 +234,37 @@ async fn main(s: Spawner) {
     //     .await
     //     .expect("error establishing TLS connection");
     // HttpClient::new(&tls, &dns);
-    debug!("tcp connected to {}", remote);
+    // debug!("tcp connected to {}", remote);
 
-    // tls.write_all(b"GET /path/resource HTTP/1.1\r\n Host: example.com\r\n ")
+    // let req = concat_bytes!(
+    //     b"GET / HTTP/1.1\r\n",
+    //     b"Connection: Upgrade\r\n",
+    //     b"Host: echo.websocket.org\r\n",
+    //     b"Sec-WebSocket-Key: AAAAAAAAAAAAAAAAAAAAAA==\r\n",
+    //     b"Sec-WebSocket-Version: 13\r\n",
+    //     b"Upgrade: websocket\r\n",
+    //     b"\r\n"
+    // );
+    // dbg!(str::from_utf8(req).unwrap());
+    // tls_conn
+    //     // .write_all(b"GET / HTTP/1.1\r\nHost: www.google.com\r\n\r\n")
+    //     .write_all(req)
     //     .await
     //     .expect("error writing data");
-    // tls.flush().await.expect("error flushing data");
-    // let mut rx_buf = [0; 128];
-    // let sz = tls.read(&mut rx_buf[..]).await.expect("error reading data");
-    // log::info!("Read {} bytes: {:?}", sz, &rx_buf[..sz]);
+    // // tls_conn.flush().await.expect("error flushing data");
+    // let mut rx_buf = [0; 7000];
+    // println!("reading data from tls");
+    // let sz = tls_conn
+    //     .read(&mut rx_buf[..])
+    //     .await
+    //     .expect("error reading data");
+    // log::info!(
+    //     "Read {} bytes: {}",
+    //     sz,
+    //     str::from_utf8(&rx_buf[..sz]).unwrap()
+    // );
 
-    // let mut robot = Robot::new(proto, codec);
+    // let mut robot = Robot::new(ws, codec);
     // robot.set_state(RobotState::Idle).await;
     // robot.main_loop().await;
 }

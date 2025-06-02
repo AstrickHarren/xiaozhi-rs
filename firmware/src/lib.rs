@@ -6,7 +6,7 @@
 
 use core::{fmt::Debug, future::Future};
 
-use bytes::BytesMut;
+use bytes::{Bytes, BytesMut};
 use embassy_futures::select::select;
 use log::info;
 use serde::{Deserialize, Serialize};
@@ -34,16 +34,17 @@ pub enum Command {
     Listen,
 }
 
+#[derive(Debug)]
 pub enum Msg {
     Cmd(Command),
-    Audio(BytesMut),
+    Audio(Bytes),
 }
 
 pub trait Protocol {
     type Error;
 
-    fn recv(&self) -> impl Future<Output = Result<Msg, Self::Error>>;
-    fn send_bin(&self, data: &[u8]) -> impl Future<Output = Result<(), Self::Error>>;
+    fn recv(&mut self) -> impl Future<Output = Result<Msg, Self::Error>>;
+    fn send_bin(&mut self, data: &[u8]) -> impl Future<Output = Result<(), Self::Error>>;
 }
 
 pub trait Audio {

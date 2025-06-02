@@ -56,6 +56,7 @@ embedded-websocket = { path = "../../embedded-websocket", default-features = fal
 static_cell = { version = "2.1.0", features = ["nightly"] }
 log = "0.4.27"
 rand_core = "0.9.3"
+rand_chacha = { version = "0.9.0", default-features = false }
 reqwless = "0.13.0"
 rust-mqtt = { version = "0.3.0", default-features = false, features = ["log"] }
 serde = { version = "1.0.219", default-features = false, features = ["derive"] }
@@ -64,6 +65,7 @@ serde-json-core = { version = "0.6.0", default-features = false }
 # Opus
 audiopus_sys = { path = "../audiopus_sys" }
 opus = { path = "../opus-rs" }
+nourl = "0.1.4"
 
 [features]
 default = ["esp32s3"]

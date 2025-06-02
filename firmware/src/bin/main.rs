@@ -5,31 +5,14 @@
 #![feature(inherent_str_constructors)]
 #![feature(concat_bytes)]
 
-use core::cell::RefCell;
-use core::net::SocketAddr;
-use core::ops::DerefMut;
-
 use embassy_executor::Spawner;
-use embassy_net::dns::DnsQueryType;
 use embassy_net::dns::DnsSocket;
 use embassy_net::tcp::client::TcpClient;
 use embassy_net::tcp::client::TcpClientState;
-use embassy_net::tcp::client::TcpConnection;
-use embassy_net::IpEndpoint;
-use embassy_net::Stack;
-use embedded_io_async::Read;
-use embedded_io_async::Write;
-use embedded_nal_async::TcpConnect;
-use embedded_tls::Aes128GcmSha256;
-use embedded_tls::NoVerify;
-use embedded_tls::TlsError;
-use embedded_tls::{TlsConfig, TlsConnection, TlsContext};
-use embedded_websocket::framer::FramerError;
 use embedded_websocket::EmptyRng;
 use esp_backtrace as _;
 use esp_hal::clock::CpuClock;
 use esp_hal::peripheral::Peripheral;
-use esp_hal::rng::Rng;
 use esp_hal::rng::Trng;
 use esp_hal::timer::timg::TimerGroup;
 use esp_println::dbg;
@@ -38,30 +21,17 @@ use firmware::audio::I2sConfig;
 use firmware::codec::I2sSimplex;
 use firmware::codec::I2sSimplexConfig;
 use firmware::mk_buf;
-use firmware::mk_static;
-use firmware::net::Connect;
 use firmware::net::TlsClient;
 use firmware::net::WebSocketClient;
-use firmware::proto::websocket::WebSocket;
-use firmware::proto::MqttUdp;
+use firmware::proto::BufTransport;
+use firmware::proto::Transport;
 use firmware::wifi::{WifiConfig, WifiConnection};
-use firmware::Protocol;
+use firmware::DummyAudio;
 use firmware::Robot;
 use firmware::RobotState;
-use log::debug;
 use log::info;
-use nourl::Url;
-use reqwless::client::HttpClient;
-use reqwless::client::HttpConnection;
-use reqwless::client::TlsVerify;
-use reqwless::request::Method;
-use reqwless::request::RequestBuilder;
-use rust_mqtt::utils::rng_generator::CountingRng;
 
 const TCP_BUF_SIZE: usize = 1024;
-const TCP_QUEUE_SIZE: usize = 3;
-const MQTT_MAX_PROPERTIES: usize = 5;
-const UDP_BUF_SIZE: usize = 512;
 
 #[esp_hal_embassy::main]
 async fn main(s: Spawner) {
@@ -104,43 +74,44 @@ async fn main(s: Spawner) {
         mk_buf!(4096),
         mk_buf!(1024),
     );
-    let mut ws = WebSocketClient::new(tls, EmptyRng::new(), mk_buf!(2048), mk_buf!(1024));
+    let mut ws = WebSocketClient::new(tls, EmptyRng::new(), mk_buf!(1024), mk_buf!(1024));
     let mut conn = ws
-        .connect("https://echo.websocket.org", None)
-        .await
-        .unwrap();
-    println!("websocket connected");
-    conn.send_text("hello, world").await.unwrap();
-    dbg!(conn.recv().await.unwrap());
-    dbg!(conn.recv().await.unwrap());
-
-    let codec = {
-        let (speaker_buf, speaker_tx) = I2sConfig {
-            i2s: peripherals.I2S0,
-            dma: peripherals.DMA_CH0,
-            bclk: peripherals.GPIO15,
-            ws: peripherals.GPIO16,
-        }
-        .build_output(peripherals.GPIO7);
-        let (mic_buf, mic_rx) = I2sConfig {
-            i2s: peripherals.I2S1,
-            dma: peripherals.DMA_CH1,
-            ws: peripherals.GPIO4,
-            bclk: peripherals.GPIO5,
-        }
-        .build_input(peripherals.GPIO6);
-        I2sSimplex::new(
-            &s,
-            I2sSimplexConfig {
-                mic_rx,
-                mic_buf,
-                speaker_tx,
-                speaker_buf,
-            },
+        .connect(
+            "https://echo.websocket.org",
+            Some(&["Device-Id:E4:59:76:78:E0:24"]),
         )
-    };
+        .await
+        .unwrap()
+        .into_buffered(1024);
+    conn.buf_read().await.unwrap();
 
-    let mut robot = Robot::new(conn, codec);
+    // let codec = {
+    //     let (speaker_buf, speaker_tx) = I2sConfig {
+    //         i2s: peripherals.I2S0,
+    //         dma: peripherals.DMA_CH0,
+    //         bclk: peripherals.GPIO15,
+    //         ws: peripherals.GPIO16,
+    //     }
+    //     .build_output(peripherals.GPIO7);
+    //     let (mic_buf, mic_rx) = I2sConfig {
+    //         i2s: peripherals.I2S1,
+    //         dma: peripherals.DMA_CH1,
+    //         ws: peripherals.GPIO4,
+    //         bclk: peripherals.GPIO5,
+    //     }
+    //     .build_input(peripherals.GPIO6);
+    //     I2sSimplex::new(
+    //         &s,
+    //         I2sSimplexConfig {
+    //             mic_rx,
+    //             mic_buf,
+    //             speaker_tx,
+    //             speaker_buf,
+    //         },
+    //     )
+    // };
+
+    let mut robot = Robot::new(conn, DummyAudio);
     robot.set_state(RobotState::Idle).await;
     robot.main_loop().await;
 }

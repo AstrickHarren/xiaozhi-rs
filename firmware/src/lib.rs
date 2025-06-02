@@ -8,7 +8,9 @@ use core::{fmt::Debug, future::Future};
 
 use bytes::{Bytes, BytesMut};
 use embassy_futures::select::select;
+use esp_println::println;
 use log::info;
+use proto::{BufTransport, Protocol, Transport};
 use serde::{Deserialize, Serialize};
 
 pub mod audio;
@@ -41,13 +43,6 @@ pub enum Msg {
     Audio(Bytes),
 }
 
-pub trait Protocol {
-    type Error;
-
-    fn recv(&mut self) -> impl Future<Output = Result<Msg, Self::Error>>;
-    fn send_bin(&mut self, data: &[u8]) -> impl Future<Output = Result<(), Self::Error>>;
-}
-
 pub trait Audio {
     type Error;
 
@@ -55,15 +50,28 @@ pub trait Audio {
     fn record(&mut self) -> impl Future<Output = Result<BytesMut, Self::Error>>;
 }
 
+pub struct DummyAudio;
+impl Audio for DummyAudio {
+    type Error = ();
+
+    fn play(&mut self, _data: &[u8]) -> impl Future<Output = Result<(), Self::Error>> {
+        async { Ok(()) }
+    }
+
+    fn record(&mut self) -> impl Future<Output = Result<BytesMut, Self::Error>> {
+        async { Ok(BytesMut::new()) }
+    }
+}
+
 pub struct Robot<P, C> {
     state: RobotState,
-    proto: P,
+    proto: Protocol<P>,
     codec: C,
 }
 
 impl<P, C> Robot<P, C>
 where
-    P: Protocol,
+    P: BufTransport,
     C: Audio,
     C::Error: Debug,
     P::Error: Debug,
@@ -71,7 +79,7 @@ where
     pub fn new(proto: P, codec: C) -> Self {
         Self {
             state: RobotState::Idle,
-            proto,
+            proto: Protocol::new(proto),
             codec,
         }
     }
@@ -83,50 +91,55 @@ where
     }
 
     pub async fn main_loop(mut self) {
-        loop {
-            match self.state {
-                RobotState::Idle => self.idle().await.unwrap(),
-                RobotState::Speaking => self.speaking().await.unwrap(),
-                RobotState::Listening => self.listening().await.unwrap(),
-            }
-        }
+        println!("start robot");
+        self.proto.send_hello().await.unwrap();
+        println!("hello sent");
+        self.proto.recv_hello().await.unwrap();
+        println!("hello recved");
+        // loop {
+        //     match self.state {
+        //         RobotState::Idle => self.idle().await.unwrap(),
+        //         RobotState::Speaking => self.speaking().await.unwrap(),
+        //         RobotState::Listening => self.listening().await.unwrap(),
+        //     }
+        // }
     }
 
-    async fn idle(&mut self) -> Result<(), P::Error> {
-        match self.proto.recv().await? {
-            Msg::Cmd(Command::Stop) => self.set_state(RobotState::Idle).await,
-            Msg::Cmd(Command::Speak) => self.set_state(RobotState::Speaking).await,
-            Msg::Cmd(Command::Listen) => self.set_state(RobotState::Listening).await,
-            Msg::Audio(_) => (),
-        };
-        Ok(())
-    }
+    // async fn idle(&mut self) -> Result<(), P::Error> {
+    //     match self.proto.recv().await? {
+    //         Msg::Cmd(Command::Stop) => self.set_state(RobotState::Idle).await,
+    //         Msg::Cmd(Command::Speak) => self.set_state(RobotState::Speaking).await,
+    //         Msg::Cmd(Command::Listen) => self.set_state(RobotState::Listening).await,
+    //         Msg::Audio(_) => (),
+    //     };
+    //     Ok(())
+    // }
 
-    async fn speaking(&mut self) -> Result<(), P::Error> {
-        match self.proto.recv().await? {
-            Msg::Cmd(cmd) => match cmd {
-                // TODO: reset codec here
-                Command::Stop => self.set_state(RobotState::Idle).await,
-                Command::Speak => self.set_state(RobotState::Speaking).await,
-                Command::Listen => self.set_state(RobotState::Listening).await,
-            },
-            Msg::Audio(bin) => self.codec.play(&bin).await.unwrap(),
-        };
+    // async fn speaking(&mut self) -> Result<(), P::Error> {
+    //     match self.proto.recv().await? {
+    //         Msg::Cmd(cmd) => match cmd {
+    //             // TODO: reset codec here
+    //             Command::Stop => self.set_state(RobotState::Idle).await,
+    //             Command::Speak => self.set_state(RobotState::Speaking).await,
+    //             Command::Listen => self.set_state(RobotState::Listening).await,
+    //         },
+    //         Msg::Audio(bin) => self.codec.play(&bin).await.unwrap(),
+    //     };
 
-        Ok(())
-    }
+    //     Ok(())
+    // }
 
-    async fn listening(&mut self) -> Result<(), P::Error> {
-        use embassy_futures::select::Either::*;
-        match select(self.proto.recv(), self.codec.record()).await {
-            First(cmd) => match cmd? {
-                Msg::Cmd(Command::Stop) => self.set_state(RobotState::Idle).await,
-                Msg::Cmd(Command::Speak) => self.set_state(RobotState::Speaking).await,
-                Msg::Cmd(Command::Listen) => self.set_state(RobotState::Listening).await,
-                Msg::Audio(_) => (),
-            },
-            Second(bin) => self.proto.send_bin(&bin.unwrap()).await.unwrap(),
-        }
-        Ok(())
-    }
+    // async fn listening(&mut self) -> Result<(), P::Error> {
+    //     use embassy_futures::select::Either::*;
+    //     match select(self.proto.recv(), self.codec.record()).await {
+    //         First(cmd) => match cmd? {
+    //             Msg::Cmd(Command::Stop) => self.set_state(RobotState::Idle).await,
+    //             Msg::Cmd(Command::Speak) => self.set_state(RobotState::Speaking).await,
+    //             Msg::Cmd(Command::Listen) => self.set_state(RobotState::Listening).await,
+    //             Msg::Audio(_) => (),
+    //         },
+    //         Second(bin) => self.proto.send_bin(&bin.unwrap()).await.unwrap(),
+    //     }
+    //     Ok(())
+    // }
 }

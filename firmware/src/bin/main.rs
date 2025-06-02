@@ -97,34 +97,8 @@ async fn main(s: Spawner) {
     const URL: &str = "https://echo.websocket.org";
     let url: Url = Url::parse(URL).unwrap();
     let ip = dns.query(url.host(), DnsQueryType::A).await.unwrap()[0];
-    println!("connecting to ip {}", ip);
     let tcp_conn = tcp.connect(SocketAddr::new(ip.into(), 443)).await.unwrap();
-    println!("tcp connection complete");
-
-    // let mut http = HttpClient::new_with_tls(
-    //     &tcp,
-    //     &dns,
-    //     reqwless::client::TlsConfig::new(
-    //         0,
-    //         mk_buf![u8, 0; 7000],
-    //         mk_buf![u8, 0; 1024],
-    //         TlsVerify::None,
-    //     ),
-    // );
-    // let mut req = http
-    //     .request(Method::GET, "https://google.com")
-    //     .await
-    //     .unwrap();
-    // let mut resp = req
-    //     .send(mk_buf![u8, 0; 1024])
-    //     .await
-    //     .unwrap()
-    //     .body()
-    //     .reader();
-    // let body = &mut [0; 7000];
-    // let n = resp.read(body).await.unwrap();
-    // dbg!(str::from_utf8(&body[..n]));
-
+    debug!("tcp connection complete");
     let mut tls_conn =
         TlsConnection::new(tcp_conn, mk_buf![u8, 0; 1024 * 10], mk_buf![u8, 0; 1024]);
     let config = TlsConfig::<Aes128GcmSha256>::new().with_server_name(url.host());
@@ -135,19 +109,7 @@ async fn main(s: Spawner) {
         ))
         .await
         .expect("error establishing TLS connection");
-    println!("tls connection complete");
-
-    // use embedded_tls::{TlsConfig, TlsContext};
-    // // use rand_chacha::ChaCha8Rng;
-    // // use rand_core::{RngCore, SeedableRng};
-    // let mut rng = ChaCha8Rng::seed_from_u64(tls.seed);
-    // // tls.seed = rng.next_u64();
-    // let mut config = TlsConfig::new().with_server_name(url.host());
-    // let mut conn: embedded_tls::TlsConnection =
-    //     embedded_tls::TlsConnection::new(conn, tls.read_buffer, tls.write_buffer);
-    // conn.open::<_, embedded_tls::NoVerify>(TlsContext::new(&config, &mut rng))
-    //     .await?;
-
+    debug!("tls connection complete");
     let mut ws = WebSocketClient::new_client(EmptyRng::new());
     let mut ws = WebSocket::new(&mut ws, tls_conn).await;
     let opt = embedded_websocket::WebSocketOptions {
@@ -158,119 +120,36 @@ async fn main(s: Spawner) {
         additional_headers: None,
     };
     ws.connect(opt).await.unwrap();
-    println!("websocket connection complete");
-    ws.send_text("hello, world").await.unwrap();
-    dbg!(ws.recv().await.unwrap());
-    ws.send_text("hello, again").await.unwrap();
-    dbg!(ws.recv().await.unwrap());
-    ws.send_bin(b"hello binary").await.unwrap();
-    dbg!(ws.recv().await.unwrap());
 
-    // let codec = {
-    //     let (speaker_buf, speaker_tx) = I2sConfig {
-    //         i2s: peripherals.I2S0,
-    //         dma: peripherals.DMA_CH0,
-    //         bclk: peripherals.GPIO15,
-    //         ws: peripherals.GPIO16,
-    //     }
-    //     .build_output(peripherals.GPIO7);
-    //     let (mic_buf, mic_rx) = I2sConfig {
-    //         i2s: peripherals.I2S1,
-    //         dma: peripherals.DMA_CH1,
-    //         ws: peripherals.GPIO4,
-    //         bclk: peripherals.GPIO5,
-    //     }
-    //     .build_input(peripherals.GPIO6);
-    //     I2sSimplex::new(
-    //         &s,
-    //         I2sSimplexConfig {
-    //             mic_rx,
-    //             mic_buf,
-    //             speaker_tx,
-    //             speaker_buf,
-    //         },
-    //     )
-    // };
+    let codec = {
+        let (speaker_buf, speaker_tx) = I2sConfig {
+            i2s: peripherals.I2S0,
+            dma: peripherals.DMA_CH0,
+            bclk: peripherals.GPIO15,
+            ws: peripherals.GPIO16,
+        }
+        .build_output(peripherals.GPIO7);
+        let (mic_buf, mic_rx) = I2sConfig {
+            i2s: peripherals.I2S1,
+            dma: peripherals.DMA_CH1,
+            ws: peripherals.GPIO4,
+            bclk: peripherals.GPIO5,
+        }
+        .build_input(peripherals.GPIO6);
+        I2sSimplex::new(
+            &s,
+            I2sSimplexConfig {
+                mic_rx,
+                mic_buf,
+                speaker_tx,
+                speaker_buf,
+            },
+        )
+    };
 
-    // tls
-
-    // let remote: IpEndpoint = "10.13.37.2:443".parse().unwrap();
-    // let state = &*mk_static!(
-    //     TcpClientState::<TCP_QUEUE_SIZE, TCP_BUF_SIZE, TCP_BUF_SIZE>,
-    //     TcpClientState::new()
-    // );
-    // let tcp = mk_static!(
-    //     TcpClient::<TCP_QUEUE_SIZE, TCP_BUF_SIZE, TCP_BUF_SIZE>,
-    //     TcpClient::new(stack, state)
-    // );
-    // let rx = mk_buf![u8, 0; TCP_BUF_SIZE];
-    // const KEEP_ALIVE: u16 = 60;
-
-    // const URL: &'static str = "https://host.wokwi.internal";
-    // let tls = TlsClient {
-    //     tcp,
-    //     rng: Trng::new(peripherals.RNG, peripherals.ADC1).into(),
-    // };
-    // let dns = DnsSocket::new(stack);
-    // let mut http = HttpClient::new(&tls, &dns);
-    // let mut req = http.request(Method::GET, URL).await.unwrap();
-    // let mut resp = req.send(rx).await.unwrap().body().reader();
-    // let body = &mut [0; 1024];
-    // let n = resp.read(body).await.unwrap();
-    // dbg!(str::from_utf8(&body[..n]));
-
-    // println!("connecting to {URL}");
-    // let ip = dns
-    //     .query("host.wokwi.internal.come", DnsQueryType::A)
-    //     .await
-    //     .unwrap()
-    //     .first()
-    //     .unwrap();
-    // debug!("tcp connecting to {}", remote);
-    // let tcp_conn = tcp
-    //     .connect(SocketAddr::new(remote.addr.into(), 1883))
-    //     .await
-    //     .unwrap();
-    // let mut tls = TlsConnection::new(tcp_conn, rx, tx);
-    // let mut trng = Trng::new(peripherals.RNG, peripherals.ADC1);
-    // let config = TlsConfig::<Aes128GcmSha256>::new().with_server_name("localhost");
-    // tls.open::<_, embedded_tls::NoVerify>(TlsContext::new(&config, &mut trng))
-    //     .await
-    //     .expect("error establishing TLS connection");
-    // HttpClient::new(&tls, &dns);
-    // debug!("tcp connected to {}", remote);
-
-    // let req = concat_bytes!(
-    //     b"GET / HTTP/1.1\r\n",
-    //     b"Connection: Upgrade\r\n",
-    //     b"Host: echo.websocket.org\r\n",
-    //     b"Sec-WebSocket-Key: AAAAAAAAAAAAAAAAAAAAAA==\r\n",
-    //     b"Sec-WebSocket-Version: 13\r\n",
-    //     b"Upgrade: websocket\r\n",
-    //     b"\r\n"
-    // );
-    // dbg!(str::from_utf8(req).unwrap());
-    // tls_conn
-    //     // .write_all(b"GET / HTTP/1.1\r\nHost: www.google.com\r\n\r\n")
-    //     .write_all(req)
-    //     .await
-    //     .expect("error writing data");
-    // // tls_conn.flush().await.expect("error flushing data");
-    // let mut rx_buf = [0; 7000];
-    // println!("reading data from tls");
-    // let sz = tls_conn
-    //     .read(&mut rx_buf[..])
-    //     .await
-    //     .expect("error reading data");
-    // log::info!(
-    //     "Read {} bytes: {}",
-    //     sz,
-    //     str::from_utf8(&rx_buf[..sz]).unwrap()
-    // );
-
-    // let mut robot = Robot::new(ws, codec);
-    // robot.set_state(RobotState::Idle).await;
-    // robot.main_loop().await;
+    let mut robot = Robot::new(ws, codec);
+    robot.set_state(RobotState::Idle).await;
+    robot.main_loop().await;
 }
 
 struct TlsClient<'a> {

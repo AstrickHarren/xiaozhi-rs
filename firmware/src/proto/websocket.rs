@@ -89,7 +89,10 @@ where
         loop {
             let result = self.framer.read(&mut self.conn, &mut buf).await?;
             match result {
-                ReadResult::Binary(bytes) => break Ok(Msg::Audio(Bytes::copy_from_slice(&bytes))),
+                ReadResult::Binary(bytes) => {
+                    println!("recved binary {:?}", str::from_utf8(bytes));
+                    break Ok(Msg::Audio(Bytes::copy_from_slice(&bytes)));
+                }
                 ReadResult::Text(t) => {
                     println!("recved text {}", t);
                     break Ok(Msg::Cmd(Command::Stop));

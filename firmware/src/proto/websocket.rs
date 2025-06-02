@@ -9,7 +9,7 @@ use embedded_websocket::{
 use esp_println::println;
 use rand_core::RngCore;
 
-use crate::{Msg, Protocol};
+use crate::{Command, Msg, Protocol};
 
 const TCP_Q_SZ: usize = 3;
 const TCP_RX_SZ: usize = 1024;
@@ -92,7 +92,7 @@ where
                 ReadResult::Binary(bytes) => break Ok(Msg::Audio(Bytes::copy_from_slice(&bytes))),
                 ReadResult::Text(t) => {
                     println!("recved text {}", t);
-                    // break Ok(Msg::Cmd(serde_json_core::from_str(t).unwrap().0));
+                    break Ok(Msg::Cmd(Command::Stop));
                 }
                 ReadResult::Closed => break Err(FramerError::Io(TlsError::ConnectionClosed)),
                 _ => (),

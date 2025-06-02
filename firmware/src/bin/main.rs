@@ -161,6 +161,10 @@ async fn main(s: Spawner) {
     println!("websocket connection complete");
     ws.send_text("hello, world").await.unwrap();
     dbg!(ws.recv().await.unwrap());
+    ws.send_text("hello, again").await.unwrap();
+    dbg!(ws.recv().await.unwrap());
+    ws.send_bin(b"hello binary").await.unwrap();
+    dbg!(ws.recv().await.unwrap());
 
     // let codec = {
     //     let (speaker_buf, speaker_tx) = I2sConfig {

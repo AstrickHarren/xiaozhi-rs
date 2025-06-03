@@ -1,9 +1,14 @@
-use core::{fmt::Debug, future::Future};
+use core::{
+    cell::RefCell,
+    fmt::{Debug, Display},
+    future::Future,
+};
 
 use bytes::{Bytes, BytesMut};
 use esp_println::println;
+use serde::{Deserialize, Serialize};
 
-use crate::{util::BytesMutExtend, Msg};
+use crate::util::BytesMutExtend;
 
 pub mod mqtt_udp;
 
@@ -16,6 +21,15 @@ pub enum MsgType {
 pub enum ProtoMsg<'a> {
     Text(&'a str),
     Binary(&'a [u8]),
+}
+
+impl<'a> Display for ProtoMsg<'a> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            ProtoMsg::Text(text) => write!(f, "{}", text),
+            ProtoMsg::Binary(data) => write!(f, "{:?}", data),
+        }
+    }
 }
 
 pub trait Transport {
@@ -45,15 +59,6 @@ pub trait Transport {
 
 pub trait BufTransport: Transport {
     fn buf_read(&mut self) -> impl Future<Output = Result<ProtoMsg<'_>, Self::Error>>;
-
-    fn recv(&mut self) -> impl Future<Output = Result<Msg, Self::Error>> {
-        async {
-            match self.buf_read().await? {
-                ProtoMsg::Binary(b) => Ok(Msg::Audio(Bytes::copy_from_slice(b))),
-                ProtoMsg::Text(_) => todo!(),
-            }
-        }
-    }
 }
 
 pub struct Buffered<P> {
@@ -89,7 +94,7 @@ impl<P: Transport> BufTransport for Buffered<P> {
 }
 
 pub struct Protocol<T> {
-    transport: T,
+    pub transport: T,
 }
 
 impl<T: BufTransport> Protocol<T> {
@@ -113,15 +118,48 @@ impl<T: BufTransport> Protocol<T> {
         self.transport.write(ProtoMsg::Text(json)).await
     }
 
-    pub async fn recv_hello(&mut self) -> Result<(), T::Error> {
+    pub async fn recv_hello(&mut self) -> Result<&str, T::Error> {
+        #[derive(Deserialize)]
+        struct ServerHello<'a> {
+            session_id: &'a str,
+        }
+
         match self.transport.buf_read().await? {
             ProtoMsg::Text(t) => {
-                println!("recved back hello: {}", t);
-                Ok(())
+                let (hello, _) = serde_json_core::from_str::<ServerHello>(&t).unwrap();
+                Ok(hello.session_id)
             }
             ProtoMsg::Binary(_) => {
                 panic!("Unexpected binary message")
             }
         }
+    }
+
+    pub async fn send_listening(&mut self, session_id: &str) -> Result<(), T::Error> {
+        extern crate alloc;
+        let msg = alloc::format!(
+            r#"{{
+            "session_id": "{session_id}",
+            "type": "listen",
+            "state": "start",
+            "mode": "auto"
+            }}
+            "#
+        );
+        self.transport.send_text(msg.as_str()).await
+    }
+
+    pub async fn send_listening_stop(&mut self, session_id: &str) -> Result<(), T::Error> {
+        extern crate alloc;
+        let msg = alloc::format!(
+            r#"{{
+            "session_id": "{session_id}",
+            "type": "listen",
+            "state": "stop",
+            "mode": "auto"
+            }}
+            "#
+        );
+        self.transport.send_text(msg.as_str()).await
     }
 }

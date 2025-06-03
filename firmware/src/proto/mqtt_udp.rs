@@ -21,11 +21,7 @@ use rust_mqtt::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    util::{BytesMutExtend, SliceExt},
-    Msg,
-};
-use crate::{Command, Transport};
+use crate::util::{BytesMutExtend, SliceExt};
 
 const TCP_BUF_SIZE: usize = 512;
 const TCP_QUEUE_SIZE: usize = 3;
@@ -180,61 +176,61 @@ async fn task(
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-struct MqttMsg {
-    command: Command,
-}
+// #[derive(Debug, Serialize, Deserialize)]
+// struct MqttMsg {
+//     command: Command,
+// }
 
-impl MqttUdp {
-    async fn recv_cmd(&self) -> Result<crate::Command, ()> {
-        use embassy_futures::select::Either::*;
-        loop {
-            let mut mqtt = self.mqtt.lock().await;
-            match select(
-                mqtt.as_mut().unwrap().receive_message(),
-                self.mqtt_need_ping.receive(),
-            )
-            .await
-            {
-                First(Ok((_, payload))) => {
-                    let (msg, _) = serde_json_core::from_slice::<MqttMsg>(payload).unwrap();
-                    debug!("mqtt: received msg {:?}", msg);
-                    break Ok(msg.command);
-                }
-                First(Err(e)) => {
-                    drop(mqtt);
-                    warn!("Mqtt disconnected because {e:?}, reconnecting");
-                    self.reconnect().await;
-                }
-                Second(_) => {
-                    debug!("Mqtt send ping");
-                    mqtt.as_mut().unwrap().send_ping().await.unwrap();
-                }
-            }
-        }
-    }
-
-    async fn recv_bin(&self) -> Result<bytes::BytesMut, ()> {
-        let mut buf = BytesMut::with_capacity(1024);
-        let (n, _) = self.socket.recv_from(buf.transmute_cap()).await.unwrap();
-        unsafe { buf.advance_mut(n) };
-        Ok(buf)
-    }
-}
-
-// impl Protocol for MqttUdp {
-//     type Error = ();
-
-//     async fn recv(&mut self) -> Result<crate::Msg, Self::Error> {
+// impl MqttUdp {
+//     async fn recv_cmd(&self) -> Result<crate::Command, ()> {
 //         use embassy_futures::select::Either::*;
-//         let msg = match select(self.recv_bin(), self.recv_cmd()).await {
-//             First(bin) => Msg::Audio(bin?.freeze()),
-//             Second(cmd) => Msg::Cmd(cmd?),
-//         };
-//         Ok(msg)
+//         loop {
+//             let mut mqtt = self.mqtt.lock().await;
+//             match select(
+//                 mqtt.as_mut().unwrap().receive_message(),
+//                 self.mqtt_need_ping.receive(),
+//             )
+//             .await
+//             {
+//                 First(Ok((_, payload))) => {
+//                     let (msg, _) = serde_json_core::from_slice::<MqttMsg>(payload).unwrap();
+//                     debug!("mqtt: received msg {:?}", msg);
+//                     break Ok(msg.command);
+//                 }
+//                 First(Err(e)) => {
+//                     drop(mqtt);
+//                     warn!("Mqtt disconnected because {e:?}, reconnecting");
+//                     self.reconnect().await;
+//                 }
+//                 Second(_) => {
+//                     debug!("Mqtt send ping");
+//                     mqtt.as_mut().unwrap().send_ping().await.unwrap();
+//                 }
+//             }
+//         }
 //     }
 
-//     async fn send_bin(&mut self, data: &[u8]) -> Result<(), Self::Error> {
-//         Ok(self.socket.send_to(data, self.remote).await.unwrap())
+//     async fn recv_bin(&self) -> Result<bytes::BytesMut, ()> {
+//         let mut buf = BytesMut::with_capacity(1024);
+//         let (n, _) = self.socket.recv_from(buf.transmute_cap()).await.unwrap();
+//         unsafe { buf.advance_mut(n) };
+//         Ok(buf)
 //     }
 // }
+
+// // impl Protocol for MqttUdp {
+// //     type Error = ();
+
+// //     async fn recv(&mut self) -> Result<crate::Msg, Self::Error> {
+// //         use embassy_futures::select::Either::*;
+// //         let msg = match select(self.recv_bin(), self.recv_cmd()).await {
+// //             First(bin) => Msg::Audio(bin?.freeze()),
+// //             Second(cmd) => Msg::Cmd(cmd?),
+// //         };
+// //         Ok(msg)
+// //     }
+
+// //     async fn send_bin(&mut self, data: &[u8]) -> Result<(), Self::Error> {
+// //         Ok(self.socket.send_to(data, self.remote).await.unwrap())
+// //     }
+// // }

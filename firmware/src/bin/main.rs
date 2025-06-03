@@ -78,42 +78,42 @@ async fn main(s: Spawner) {
         mk_buf!(1024),
     );
     let mut ws = WebSocketClient::new(tls, EmptyRng::new(), mk_buf!(1024), mk_buf!(1024));
-    let mut conn = ws
+    let conn = ws
         .connect(
             "https://2662r3426b.vicp.fun/xiaozhi/v1/",
-            Some(&["Device-Id:E4:59:76:78:E0:24"]),
+            Some(&["Device-Id:E4:59:76:78:E0:29", "Client-Id:test-client-12345"]),
         )
         .await
         .unwrap()
         .into_buffered(1024);
 
-    // let codec = {
-    //     let (speaker_buf, speaker_tx) = I2sConfig {
-    //         i2s: peripherals.I2S0,
-    //         dma: peripherals.DMA_CH0,
-    //         bclk: peripherals.GPIO15,
-    //         ws: peripherals.GPIO16,
-    //     }
-    //     .build_output(peripherals.GPIO7);
-    //     let (mic_buf, mic_rx) = I2sConfig {
-    //         i2s: peripherals.I2S1,
-    //         dma: peripherals.DMA_CH1,
-    //         ws: peripherals.GPIO4,
-    //         bclk: peripherals.GPIO5,
-    //     }
-    //     .build_input(peripherals.GPIO6);
-    //     I2sSimplex::new(
-    //         &s,
-    //         I2sSimplexConfig {
-    //             mic_rx,
-    //             mic_buf,
-    //             speaker_tx,
-    //             speaker_buf,
-    //         },
-    //     )
-    // };
+    let codec = {
+        let (speaker_buf, speaker_tx) = I2sConfig {
+            i2s: peripherals.I2S0,
+            dma: peripherals.DMA_CH0,
+            bclk: peripherals.GPIO15,
+            ws: peripherals.GPIO16,
+        }
+        .build_output(peripherals.GPIO7);
+        let (mic_buf, mic_rx) = I2sConfig {
+            i2s: peripherals.I2S1,
+            dma: peripherals.DMA_CH1,
+            ws: peripherals.GPIO4,
+            bclk: peripherals.GPIO5,
+        }
+        .build_input(peripherals.GPIO6);
+        I2sSimplex::new(
+            &s,
+            I2sSimplexConfig {
+                mic_rx,
+                mic_buf,
+                speaker_tx,
+                speaker_buf,
+            },
+        )
+    };
 
-    let mut robot = Robot::new(conn, DummyAudio);
+    let mut robot = Robot::new(conn, codec);
     robot.set_state(RobotState::Idle).await;
     robot.main_loop().await;
 }

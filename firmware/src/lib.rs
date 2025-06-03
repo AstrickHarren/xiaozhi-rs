@@ -8,8 +8,9 @@ use core::{fmt::Debug, future::Future};
 
 use bytes::{Bytes, BytesMut};
 use embassy_futures::select::select;
-use esp_println::println;
+use esp_println::{dbg, println};
 use log::info;
+use p3::P3Reader;
 use proto::{BufTransport, Protocol, Transport};
 use serde::{Deserialize, Serialize};
 
@@ -28,19 +29,6 @@ pub enum RobotState {
     Idle,
     Speaking,
     Listening,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub enum Command {
-    Stop,
-    Speak,
-    Listen,
-}
-
-#[derive(Debug)]
-pub enum Msg {
-    Cmd(Command),
-    Audio(Bytes),
 }
 
 pub trait Audio {
@@ -91,8 +79,31 @@ where
     }
 
     pub async fn main_loop(mut self) {
+        extern crate alloc;
+        use alloc::string::ToString;
+
         self.proto.send_hello().await.unwrap();
-        self.proto.recv_hello().await.unwrap();
+        let id = self.proto.recv_hello().await.unwrap().to_string();
+        info!("Session Started: {id}");
+        dbg!(self.proto.transport.buf_read().await.unwrap());
+        self.proto.send_listening(&id).await.unwrap();
+        let mut p3 = P3Reader::new(include_bytes!("../assets/wificonfig.p3"));
+        while let Some(opus) = p3.next().await.unwrap() {
+            println!("sending {} audio bytes", opus.len());
+            self.proto.transport.send_bin(&opus).await.unwrap();
+        }
+        self.proto.send_listening_stop(&id).await.unwrap();
+
+        loop {
+            let msg = self.proto.transport.buf_read().await.unwrap();
+            match msg {
+                proto::ProtoMsg::Text(t) => {
+                    println!("{t}");
+                }
+                proto::ProtoMsg::Binary(audio) => self.codec.play(audio).await.unwrap(),
+            }
+        }
+
         // loop {
         //     match self.state {
         //         RobotState::Idle => self.idle().await.unwrap(),

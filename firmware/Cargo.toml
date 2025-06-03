@@ -35,8 +35,12 @@ esp-backtrace = { version = "0.15.1", features = [
 esp-hal = { version = "1.0.0-beta.0", features = ["log", "unstable", "psram"] }
 esp-hal-embassy = { version = "0.7.0", features = ["log", "executors"] }
 esp-println = { version = "0.13.1", features = ["log"] }
-esp-wifi = { version = "0.13.0", features = ["log", "wifi"] }
-esp-wifi-sys = { version = "0.7.1", features = ["log"] }
+esp-wifi = { version = "0.13.0", features = ["wifi"] }
+esp-wifi-sys = { version = "0.7.1" }
+esp-mbedtls = { git = "https://github.com/esp-rs/esp-mbedtls.git", default-features = false, features = [
+    "esp32s3",
+    "async",
+] }
 
 # Others
 bytes = { version = "1.10.0", default-features = false }
@@ -48,8 +52,9 @@ embedded-sdmmc = "0.8.1"
 embedded-hal-bus = "0.3.0"
 embedded-io-async = "0.6.1"
 embedded-nal-async = "0.8.0"
-embedded-tls = { version = "0.17.0", default-features = false, features = [
+embedded-tls = { version = "0.17.1", git = "https://github.com/drogue-iot/embedded-tls.git", default-features = false, features = [
     "log",
+    "alloc",
     "embedded-io-adapters",
 ] }
 embedded-websocket = { path = "../../embedded-websocket", default-features = false }

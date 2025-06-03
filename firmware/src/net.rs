@@ -1,22 +1,25 @@
 use core::{fmt::Debug, future::Future, net::SocketAddr};
 
-use bytes::Bytes;
 use embassy_net::tcp::client::{TcpClient, TcpConnection};
-use embedded_io_async::{Read, Write};
+use embedded_io_async::{ErrorType, Read, Write};
 use embedded_nal_async::{Dns, TcpConnect};
-use embedded_tls::{Aes128GcmSha256, NoVerify, TlsConfig, TlsConnection, TlsContext, TlsError};
+use embedded_tls::{
+    Aes128GcmSha256, NoVerify, TlsConfig, TlsConnection, TlsContext, TlsError, UnsecureProvider,
+};
 use embedded_websocket::{
     framer_embedded::{Framer, FramerError, ReadResult},
     Client, WebSocketOptions, WebSocketSendMessageType,
 };
-use esp_println::{dbg, println};
+use esp_hal::{
+    peripheral::Peripheral,
+    peripherals::{RSA, SHA},
+};
+use esp_mbedtls::{asynch::Session, Certificates, Mode, Tls, TlsVersion, X509};
+
 use log::debug;
 use rand_core_legacy::{CryptoRng, RngCore};
 
-use crate::{
-    proto::{MsgType, ProtoMsg, Transport},
-    Command, Msg, Protocol,
-};
+use crate::proto::{ProtoMsg, Transport};
 
 pub trait Connect {
     type Remote: ?Sized;
@@ -91,11 +94,86 @@ where
         let addr = SocketAddr::new(ip, url.port().unwrap_or(443));
         let tcp = self.tcp.connect(&addr).await.unwrap();
         let mut tls = TlsConnection::<_, Aes128GcmSha256>::new(tcp, self.rx_buf, self.tx_buf);
-        let config = TlsConfig::<Aes128GcmSha256>::new().with_server_name(url.host());
-        let context = TlsContext::new(&config, &mut self.rng);
-        tls.open::<_, NoVerify>(context).await?;
+        let config = TlsConfig::new().with_server_name(url.host());
+        let context = TlsContext::new(&config, UnsecureProvider::new(&mut self.rng));
+        tls.open(context).await?;
         debug!("tls connection established");
         Ok(tls)
+    }
+}
+
+pub struct EspTlsClient<'a, T, D> {
+    tcp: T,
+    tls: Tls<'a>,
+    dns: D,
+}
+
+impl<'b, T, D> EspTlsClient<'b, T, D> {
+    pub fn new<R, S>(tcp: T, dns: D, sha: S, rsa: R) -> Self
+    where
+        R: Peripheral<P = RSA> + 'b,
+        S: Peripheral<P = SHA> + 'b,
+    {
+        Self {
+            tcp,
+            tls: Tls::new(sha).unwrap().with_hardware_rsa(rsa),
+            dns,
+        }
+    }
+}
+
+impl<'b, T, D> Connect for EspTlsClient<'b, T, D>
+where
+    T: Connect<Remote = SocketAddr>,
+    D: Dns,
+{
+    type Remote = str;
+
+    type Error = T::Error;
+
+    type Connection<'a>
+        = Session<'a, T::Connection<'a>>
+    where
+        Self: 'a;
+
+    async fn connect(
+        &mut self,
+        remote: &Self::Remote,
+    ) -> Result<Self::Connection<'_>, Self::Error> {
+        let url = nourl::Url::parse(remote).unwrap();
+        let ip = self
+            .dns
+            .get_host_by_name(url.host(), embedded_nal_async::AddrType::IPv4)
+            .await
+            .unwrap();
+        let addr = SocketAddr::new(ip, url.port().unwrap_or(443));
+
+        let mut host = [0; 100];
+        let bytes = url.host().as_bytes();
+        host[..bytes.len()].copy_from_slice(bytes);
+        let host = CStr::from_bytes_with_nul(&host[..bytes.len() + 1]).expect("unable to get host");
+
+        let certificates = Certificates {
+            ca_chain: X509::pem(
+                concat!(include_str!("./certs/www.google.com.pem"), "\0").as_bytes(),
+            )
+            .ok(),
+            ..Default::default()
+        };
+
+        use core::ffi::CStr;
+        let mut session = Session::new(
+            self.tcp.connect(&addr).await.unwrap(),
+            Mode::Client { servername: host },
+            TlsVersion::Tls1_3,
+            certificates,
+            self.tls.reference(),
+        )
+        .unwrap();
+
+        session.connect().await.unwrap();
+        debug!("tls connection established");
+        Ok(session)
     }
 }
 

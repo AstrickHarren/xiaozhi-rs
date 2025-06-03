@@ -91,11 +91,8 @@ where
     }
 
     pub async fn main_loop(mut self) {
-        println!("start robot");
         self.proto.send_hello().await.unwrap();
-        println!("hello sent");
         self.proto.recv_hello().await.unwrap();
-        println!("hello recved");
         // loop {
         //     match self.state {
         //         RobotState::Idle => self.idle().await.unwrap(),

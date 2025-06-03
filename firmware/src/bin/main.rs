@@ -21,6 +21,8 @@ use firmware::audio::I2sConfig;
 use firmware::codec::I2sSimplex;
 use firmware::codec::I2sSimplexConfig;
 use firmware::mk_buf;
+use firmware::net::Connect;
+use firmware::net::EspTlsClient;
 use firmware::net::TlsClient;
 use firmware::net::WebSocketClient;
 use firmware::proto::BufTransport;
@@ -31,7 +33,7 @@ use firmware::Robot;
 use firmware::RobotState;
 use log::info;
 
-const TCP_BUF_SIZE: usize = 1024;
+const TCP_BUF_SIZE: usize = 4096;
 
 #[esp_hal_embassy::main]
 async fn main(s: Spawner) {
@@ -65,9 +67,10 @@ async fn main(s: Spawner) {
 
     info!("Connecting to WebSocket");
     let state = TcpClientState::new();
-    let tcp = TcpClient::<1, TCP_BUF_SIZE, TCP_BUF_SIZE>::new(stack, &state);
+    let tcp = TcpClient::<1, 1024, 1024>::new(stack, &state);
     let dns = DnsSocket::new(stack);
-    let tls = TlsClient::new(
+    // TODO: maybe use esp32 tls for better performance (like hardware RSA)
+    let mut tls = TlsClient::new(
         tcp,
         dns,
         Trng::new(peripherals.RNG, peripherals.ADC1),
@@ -77,13 +80,12 @@ async fn main(s: Spawner) {
     let mut ws = WebSocketClient::new(tls, EmptyRng::new(), mk_buf!(1024), mk_buf!(1024));
     let mut conn = ws
         .connect(
-            "https://echo.websocket.org",
+            "https://2662r3426b.vicp.fun/xiaozhi/v1/",
             Some(&["Device-Id:E4:59:76:78:E0:24"]),
         )
         .await
         .unwrap()
         .into_buffered(1024);
-    conn.buf_read().await.unwrap();
 
     // let codec = {
     //     let (speaker_buf, speaker_tx) = I2sConfig {

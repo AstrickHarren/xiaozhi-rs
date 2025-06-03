@@ -7,6 +7,8 @@ runner = "espflash flash --monitor --chip esp32c3"
 [env]
 OPUS_LIB_DIR = "/Users/astrick/Repositories/chatbot-rs/firmware/lib"
 ESP_WIFI_CONFIG_RX_QUEUE_SIZE = "20"
+CC = "xtensa-esp32-elf-gcc"
+AR = "xtensa-esp32-elf-ar"
 
 [build]
 rustflags = ["-C", "link-arg=-nostartfiles"]

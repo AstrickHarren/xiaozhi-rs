@@ -9,7 +9,7 @@ use core::{fmt::Debug, future::Future};
 use bytes::{Bytes, BytesMut};
 use embassy_futures::select::select;
 use esp_println::{dbg, println};
-use log::info;
+use log::{debug, info};
 use p3::P3Reader;
 use proto::{BufTransport, Protocol, Transport};
 use serde::{Deserialize, Serialize};
@@ -89,18 +89,21 @@ where
         self.proto.send_listening(&id).await.unwrap();
         let mut p3 = P3Reader::new(include_bytes!("../assets/wificonfig.p3"));
         while let Some(opus) = p3.next().await.unwrap() {
-            println!("sending {} audio bytes", opus.len());
+            debug!("sending {} audio bytes", opus.len());
             self.proto.transport.send_bin(&opus).await.unwrap();
         }
         self.proto.send_listening_stop(&id).await.unwrap();
 
         loop {
-            let msg = self.proto.transport.buf_read().await.unwrap();
+            let msg = self.proto.recv().await.unwrap();
             match msg {
-                proto::ProtoMsg::Text(t) => {
-                    println!("{t}");
+                proto::ServerMsg::Text(t) => {
+                    println!("{t:?}");
                 }
-                proto::ProtoMsg::Binary(audio) => self.codec.play(audio).await.unwrap(),
+                proto::ServerMsg::Binary(audio) => self.codec.play(audio).await.unwrap(),
+                proto::ServerMsg::Unknown(text) => {
+                    println!("Unknown message: {}", text);
+                }
             }
         }
 

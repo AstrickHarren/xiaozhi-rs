@@ -97,6 +97,33 @@ pub struct Protocol<T> {
     pub transport: T,
 }
 
+extern crate alloc;
+use alloc::string::String;
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(tag = "type", rename_all = "lowercase")]
+pub enum ServerText {
+    Hello {},
+    Stt { text: String },
+    Llm { text: String },
+    Tts(Tts),
+    Iot {},
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum Tts {
+    Start,
+    Stop,
+    SentenceStart { text: String },
+    SentenceEnd {},
+}
+
+pub enum ServerMsg<'a> {
+    Unknown(&'a str),
+    Text(ServerText),
+    Binary(&'a [u8]),
+}
+
 impl<T: BufTransport> Protocol<T> {
     pub fn new(transport: T) -> Self {
         Self { transport }
@@ -126,12 +153,22 @@ impl<T: BufTransport> Protocol<T> {
 
         match self.transport.buf_read().await? {
             ProtoMsg::Text(t) => {
-                let (hello, _) = serde_json_core::from_str::<ServerHello>(&t).unwrap();
+                let (hello) = serde_json::from_str::<ServerHello>(&t).unwrap();
                 Ok(hello.session_id)
             }
             ProtoMsg::Binary(_) => {
                 panic!("Unexpected binary message")
             }
+        }
+    }
+
+    pub async fn recv(&mut self) -> Result<ServerMsg, T::Error> {
+        match self.transport.buf_read().await? {
+            ProtoMsg::Text(t) => Ok(serde_json::from_str::<ServerText>(&t)
+                .map(ServerMsg::Text)
+                .inspect_err(|e| log::error!("{e}"))
+                .unwrap_or_else(|_| ServerMsg::Unknown(t))),
+            ProtoMsg::Binary(b) => Ok(ServerMsg::Binary(&b)),
         }
     }
 

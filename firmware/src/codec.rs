@@ -64,7 +64,7 @@ async fn listen_task(
 ) {
     info!("start continuous i2s mic");
     const FRAME_SIZE: usize = 960;
-    let mut data = BytesMut::zeroed(1024 * 5);
+    let mut data = BytesMut::zeroed(1024 * 10);
     let mut out = BytesMut::zeroed(200);
     let mut remain = BytesMut::new();
 

@@ -65,8 +65,15 @@ rand_core_legacy = { version = "0.6.3", package = "rand_core" }
 rand_chacha = { version = "0.9.0", default-features = false }
 reqwless = "0.13.0"
 rust-mqtt = { version = "0.3.0", default-features = false, features = ["log"] }
-serde = { version = "1.0.219", default-features = false, features = ["derive"] }
-serde-json-core = { version = "0.6.0", default-features = false }
+serde = { version = "1.0.219", default-features = false, features = [
+    "derive",
+    "alloc",
+] }
+# serde-json = { version = "0.6.0", default-features = false }
+serde_json = { version = "1.0.140", default-features = false, features = [
+    "alloc",
+] }
+serde_ignored = "0.1.12"
 
 # Opus
 audiopus_sys = { path = "../audiopus_sys" }

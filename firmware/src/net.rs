@@ -153,20 +153,20 @@ where
         host[..bytes.len()].copy_from_slice(bytes);
         let host = CStr::from_bytes_with_nul(&host[..bytes.len() + 1]).expect("unable to get host");
 
-        let certificates = Certificates {
-            ca_chain: X509::pem(
-                concat!(include_str!("./certs/www.google.com.pem"), "\0").as_bytes(),
-            )
-            .ok(),
-            ..Default::default()
-        };
+        // let certificates = Certificates {
+        //     ca_chain: X509::pem(
+        //         concat!(include_str!("./certs/www.google.com.pem"), "\0").as_bytes(),
+        //     )
+        //     .ok(),
+        //     ..Default::default()
+        // };
 
         use core::ffi::CStr;
         let mut session = Session::new(
             self.tcp.connect(&addr).await.unwrap(),
             Mode::Client { servername: host },
             TlsVersion::Tls1_3,
-            certificates,
+            Certificates::new(),
             self.tls.reference(),
         )
         .unwrap();

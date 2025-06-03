@@ -64,7 +64,8 @@ async fn listen_task(
 ) {
     info!("start continuous i2s mic");
     const FRAME_SIZE: usize = 960;
-    let mut data = [0; 1024 * 5];
+    let mut data = BytesMut::zeroed(1024 * 5);
+    let mut out = BytesMut::zeroed(200);
     let mut remain = BytesMut::new();
 
     let mut enc = Encoder::new(16000, opus::Channels::Mono, opus::Application::Audio).unwrap();
@@ -84,11 +85,10 @@ async fn listen_task(
 
                 while remain.len() >= FRAME_SIZE * 2 {
                     let frame = remain.split_to(FRAME_SIZE * 2);
-                    let mut out = BytesMut::with_capacity(200);
                     let n = enc.encode(frame.transmute(), out.transmute_cap()).unwrap();
-                    unsafe { out.advance_mut(n) };
                     sender.try_send(out[..n].into()).ok(); // Ignore buffer full
                 }
+                remain = BytesMut::from(remain); // try to drop `remain` to free memory
             }
             Err(Error::DmaError(DmaError::Late)) => warn!("Dma late for mic"),
             Err(Error::DmaError(DmaError::BufferTooSmall)) => error!("Buffer too small for mic"),
